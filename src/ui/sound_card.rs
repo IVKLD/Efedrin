@@ -46,6 +46,8 @@ impl SoundCardWidget {
             .css_classes(["badge", "caption", "dim-label"])
             .halign(gtk::Align::End)
             .hexpand(true)
+            .justify(gtk::Justification::Center)
+            .width_chars(7)
             .build();
 
         top_box.append(&icon);

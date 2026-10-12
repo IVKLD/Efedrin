@@ -13,16 +13,16 @@ const CUSTOM_CSS: &str = "
 .sound-card-button {
     padding: 6px;
     border-radius: 12px;
-    transition: all 180ms ease-in-out;
+    border: 2px solid transparent;
+    transition: background-color 180ms ease-in-out, border-color 180ms ease-in-out, box-shadow 180ms ease-in-out;
 }
 
 .sound-card-button:hover {
-    transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 }
 
 .sound-card-button.is-playing {
-    border: 2px solid @accent_color;
+    border-color: @accent_color;
     background-color: alpha(@accent_color, 0.18);
     box-shadow: 0 0 14px alpha(@accent_color, 0.45);
 }
@@ -32,6 +32,7 @@ const CUSTOM_CSS: &str = "
     border-radius: 8px;
     background-color: alpha(currentColor, 0.12);
     font-weight: bold;
+    min-width: 54px;
 }
 
 .badge.badge-active {
