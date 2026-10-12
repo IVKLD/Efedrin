@@ -176,19 +176,25 @@ impl MainWindow {
             });
 
         let cfg_vol = this.config.clone();
+        let engine_vol_local = this.audio_engine.clone();
         this.controls
             .vol_local_scale()
             .connect_value_changed(move |scale| {
-                cfg_vol.borrow_mut().volume_local = scale.value();
+                let val = scale.value();
+                cfg_vol.borrow_mut().volume_local = val;
                 let _ = cfg_vol.borrow().save();
+                engine_vol_local.set_local_volume(val);
             });
 
         let cfg_mic = this.config.clone();
+        let engine_vol_mic = this.audio_engine.clone();
         this.controls
             .vol_mic_scale()
             .connect_value_changed(move |scale| {
-                cfg_mic.borrow_mut().volume_mic = scale.value();
+                let val = scale.value();
+                cfg_mic.borrow_mut().volume_mic = val;
                 let _ = cfg_mic.borrow().save();
+                engine_vol_mic.set_mic_volume(val);
             });
 
         let engine_pt = this.audio_engine.clone();

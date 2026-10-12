@@ -68,11 +68,11 @@ impl PipeWireManager {
         thread::sleep(Duration::from_millis(50));
 
         let capture_props = format!(
-            "media.class=Audio/Sink node.name={} node.description=\"Efedrin Soundpad Sink\"",
+            "media.class=Audio/Sink node.name={} node.description=\"Efedrin Soundpad Sink\" audio.rate=48000 audio.channels=2",
             SINK_NODE_NAME
         );
         let playback_props = format!(
-            "media.class=Audio/Source node.name={} node.description=\"Efedrin Virtual Microphone\"",
+            "media.class=Audio/Source node.name={} node.description=\"Efedrin Virtual Microphone\" audio.rate=48000 audio.channels=2",
             SOURCE_NODE_NAME
         );
 

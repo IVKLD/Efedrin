@@ -4,6 +4,9 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
+pub const LOCAL_STREAM_NAME: &str = "efedrin_local_stream";
+pub const MIC_STREAM_NAME: &str = "efedrin_mic_stream";
+
 #[derive(Clone)]
 pub struct AudioEngine {
     pipewire_manager: Arc<Mutex<PipeWireManager>>,
@@ -59,6 +62,7 @@ impl AudioEngine {
         if volume_local > 0.001 {
             let clamped_vol_local = volume_local.clamp(0.0, 2.0);
             let child_local = Command::new("pw-play")
+                .arg(format!("--properties=node.name=\"{}\"", LOCAL_STREAM_NAME))
                 .arg(format!("--volume={:.3}", clamped_vol_local))
                 .arg(path_str)
                 .stdin(Stdio::null())
@@ -73,6 +77,7 @@ impl AudioEngine {
             let clamped_vol_mic = volume_mic.clamp(0.0, 2.0);
             let child_mic = Command::new("pw-play")
                 .arg(format!("--target={}", SINK_NODE_NAME))
+                .arg(format!("--properties=node.name=\"{}\"", MIC_STREAM_NAME))
                 .arg(format!("--volume={:.3}", clamped_vol_mic))
                 .arg(path_str)
                 .stdin(Stdio::null())
@@ -90,6 +95,59 @@ impl AudioEngine {
         }
 
         Ok(())
+    }
+
+    fn find_node_ids_by_name(target_name: &str) -> Vec<String> {
+        let output = match Command::new("pw-cli")
+            .args(["list-objects", "Node"])
+            .output()
+        {
+            Ok(out) => out,
+            Err(_) => return Vec::new(),
+        };
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut ids = Vec::new();
+        let mut current_id = None;
+
+        for line in stdout.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("id ") && trimmed.contains("type PipeWire:Interface:Node") {
+                if let Some(id_part) = trimmed.strip_prefix("id ") {
+                    if let Some(id_str) = id_part.split(',').next() {
+                        current_id = Some(id_str.trim().to_string());
+                    }
+                }
+            } else if trimmed.starts_with("node.name = ") {
+                let name_val = trimmed.trim_start_matches("node.name = ").trim_matches('"');
+                if name_val == target_name {
+                    if let Some(id) = &current_id {
+                        ids.push(id.clone());
+                    }
+                }
+            }
+        }
+
+        ids
+    }
+
+    fn update_stream_volume(stream_name: &str, volume: f64) {
+        let clamped = volume.clamp(0.0, 2.0);
+        let ids = Self::find_node_ids_by_name(stream_name);
+        for id in ids {
+            let param_json = format!("{{ volume: {:.3} }}", clamped);
+            let _ = Command::new("pw-cli")
+                .args(["s", &id, "Props", &param_json])
+                .output();
+        }
+    }
+
+    pub fn set_local_volume(&self, volume: f64) {
+        Self::update_stream_volume(LOCAL_STREAM_NAME, volume);
+    }
+
+    pub fn set_mic_volume(&self, volume: f64) {
+        Self::update_stream_volume(MIC_STREAM_NAME, volume);
     }
 
     pub fn stop_all(&self) {
