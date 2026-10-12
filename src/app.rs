@@ -14,6 +14,8 @@ const CUSTOM_CSS: &str = "
     padding: 6px;
     border-radius: 12px;
     border: 2px solid transparent;
+    min-width: 170px;
+    min-height: 86px;
     transition: background-color 180ms ease-in-out, border-color 180ms ease-in-out, box-shadow 180ms ease-in-out;
 }
 
@@ -32,7 +34,7 @@ const CUSTOM_CSS: &str = "
     border-radius: 8px;
     background-color: alpha(currentColor, 0.12);
     font-weight: bold;
-    min-width: 54px;
+    min-width: 58px;
 }
 
 .badge.badge-active {
@@ -52,6 +54,9 @@ pub fn run() -> Result<()> {
     let app = adw::Application::builder().application_id(APP_ID).build();
 
     app.connect_startup(|_| {
+        let style_manager = adw::StyleManager::default();
+        style_manager.set_color_scheme(adw::ColorScheme::ForceDark);
+
         let provider = gtk::CssProvider::new();
         provider.load_from_data(CUSTOM_CSS);
 

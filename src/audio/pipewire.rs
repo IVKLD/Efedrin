@@ -99,52 +99,131 @@ impl PipeWireManager {
         }
         self.mic_passthrough_enabled.store(false, Ordering::SeqCst);
     }
+}
 
-    fn discover_hardware_mic_ports() -> Vec<String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MicrophoneSource {
+    pub node_name: String,
+    pub description: String,
+    pub ports: Vec<String>,
+}
+
+impl PipeWireManager {
+    pub fn list_microphones() -> Vec<MicrophoneSource> {
         let output = match Command::new("pw-link").arg("-o").output() {
             Ok(out) => out,
             Err(_) => return Vec::new(),
         };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let mut mic_ports = Vec::new();
+        let mut node_to_ports: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
 
         for line in stdout.lines() {
             let trimmed = line.trim();
-            if trimmed.contains("alsa_input")
-                && (trimmed.contains(":capture_") || trimmed.contains(":input_"))
-                && !trimmed.contains("efedrin")
-            {
-                mic_ports.push(trimmed.to_string());
+            if trimmed.is_empty() || trimmed.contains("efedrin") {
+                continue;
+            }
+            if let Some((node, _port)) = trimmed.split_once(':') {
+                if node.starts_with("alsa_input") || node.starts_with("easyeffects_source") {
+                    node_to_ports
+                        .entry(node.to_string())
+                        .or_default()
+                        .push(trimmed.to_string());
+                }
             }
         }
 
-        mic_ports
+        let desc_output = Command::new("pw-cli")
+            .args(["list-objects", "Node"])
+            .output()
+            .ok();
+        let mut descriptions = std::collections::HashMap::new();
+
+        if let Some(out) = desc_output {
+            let dump = String::from_utf8_lossy(&out.stdout);
+            let mut curr_name = None;
+            let mut curr_desc = None;
+
+            for line in dump.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("id ") && trimmed.contains("type PipeWire:Interface:Node") {
+                    if let (Some(n), Some(d)) = (curr_name.take(), curr_desc.take()) {
+                        descriptions.insert(n, d);
+                    }
+                } else if trimmed.starts_with("node.name = ") {
+                    curr_name = Some(
+                        trimmed
+                            .trim_start_matches("node.name = ")
+                            .trim_matches('"')
+                            .to_string(),
+                    );
+                } else if trimmed.starts_with("node.description = ") {
+                    curr_desc = Some(
+                        trimmed
+                            .trim_start_matches("node.description = ")
+                            .trim_matches('"')
+                            .to_string(),
+                    );
+                }
+            }
+            if let (Some(n), Some(d)) = (curr_name.take(), curr_desc.take()) {
+                descriptions.insert(n, d);
+            }
+        }
+
+        let mut result = Vec::new();
+        for (node_name, ports) in node_to_ports {
+            let description = descriptions
+                .get(&node_name)
+                .cloned()
+                .unwrap_or_else(|| node_name.clone());
+            result.push(MicrophoneSource {
+                node_name,
+                description,
+                ports,
+            });
+        }
+
+        result.sort_by(|a, b| a.description.cmp(&b.description));
+        result
     }
 
-    pub fn set_mic_passthrough(&self, enable: bool) -> Result<()> {
-        let mic_ports = Self::discover_hardware_mic_ports();
+    pub fn set_mic_passthrough(&self, enable: bool, selected_mic_node: Option<&str>) -> Result<()> {
+        let all_mics = Self::list_microphones();
         let target_in_left = format!("{}:playback_FL", SINK_NODE_NAME);
         let target_in_right = format!("{}:playback_FR", SINK_NODE_NAME);
 
-        for port in &mic_ports {
-            if enable {
-                if port.ends_with("_FL") || port.ends_with("AUX0") || port.ends_with("1") {
-                    let _ = Command::new("pw-link")
-                        .args([port, &target_in_left])
-                        .output();
-                } else {
-                    let _ = Command::new("pw-link")
-                        .args([port, &target_in_right])
-                        .output();
-                }
-            } else {
+        for mic in &all_mics {
+            for port in &mic.ports {
                 let _ = Command::new("pw-link")
                     .args(["-d", port, &target_in_left])
                     .output();
                 let _ = Command::new("pw-link")
                     .args(["-d", port, &target_in_right])
                     .output();
+            }
+        }
+
+        if enable {
+            let active_mic = if let Some(node) = selected_mic_node {
+                all_mics.iter().find(|m| m.node_name == node)
+            } else {
+                all_mics.first()
+            };
+
+            if let Some(mic) = active_mic {
+                for port in &mic.ports {
+                    if port.ends_with("_FL") || port.ends_with("AUX0") || port.ends_with("1") {
+                        let _ = Command::new("pw-link")
+                            .args([port, &target_in_left])
+                            .output();
+                    } else {
+                        let _ = Command::new("pw-link")
+                            .args([port, &target_in_right])
+                            .output();
+                    }
+                }
             }
         }
 

@@ -1,3 +1,4 @@
+use crate::audio::MicrophoneSource;
 use gtk4 as gtk;
 use gtk4::prelude::*;
 
@@ -9,10 +10,21 @@ pub struct ControlsBar {
     vol_local_scale: gtk::Scale,
     vol_mic_scale: gtk::Scale,
     passthrough_switch: gtk::Switch,
+    mic_drop_down: gtk::DropDown,
+    mic_sources: std::cell::RefCell<Vec<MicrophoneSource>>,
+    progress_scale: gtk::Scale,
+    time_current_label: gtk::Label,
+    time_total_label: gtk::Label,
 }
 
 impl ControlsBar {
-    pub fn new(initial_vol_local: f64, initial_vol_mic: f64, initial_passthrough: bool) -> Self {
+    pub fn new(
+        initial_vol_local: f64,
+        initial_vol_mic: f64,
+        initial_passthrough: bool,
+        microphones: Vec<MicrophoneSource>,
+        selected_mic_node: Option<&str>,
+    ) -> Self {
         let container = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .spacing(12)
@@ -69,9 +81,22 @@ impl ControlsBar {
             .build();
 
         let pt_label = gtk::Label::builder()
-            .label("Mix Real Mic")
+            .label("Mix Mic")
             .css_classes(["caption", "heading"])
             .build();
+
+        let mic_names: Vec<&str> = microphones.iter().map(|m| m.description.as_str()).collect();
+        let mic_string_list = gtk::StringList::new(&mic_names);
+        let mic_drop_down = gtk::DropDown::builder()
+            .model(&mic_string_list)
+            .tooltip_text("Select physical microphone for passthrough")
+            .build();
+
+        if let Some(selected) = selected_mic_node {
+            if let Some(idx) = microphones.iter().position(|m| m.node_name == selected) {
+                mic_drop_down.set_selected(idx as u32);
+            }
+        }
 
         let passthrough_switch = gtk::Switch::builder()
             .active(initial_passthrough)
@@ -80,6 +105,7 @@ impl ControlsBar {
 
         passthrough_box.append(&pt_icon);
         passthrough_box.append(&pt_label);
+        passthrough_box.append(&mic_drop_down);
         passthrough_box.append(&passthrough_switch);
 
         row1.append(&folder_button);
@@ -157,8 +183,34 @@ impl ControlsBar {
         row2.append(&local_box);
         row2.append(&mic_box);
 
+        let progress_box = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(12)
+            .build();
+
+        let time_current_label = gtk::Label::builder()
+            .label("00:00")
+            .css_classes(["caption", "numeric"])
+            .width_chars(5)
+            .build();
+
+        let progress_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 0.5);
+        progress_scale.set_hexpand(true);
+        progress_scale.set_draw_value(false);
+
+        let time_total_label = gtk::Label::builder()
+            .label("00:00")
+            .css_classes(["caption", "numeric", "dim-label"])
+            .width_chars(5)
+            .build();
+
+        progress_box.append(&time_current_label);
+        progress_box.append(&progress_scale);
+        progress_box.append(&time_total_label);
+
         container.append(&row1);
         container.append(&row2);
+        container.append(&progress_box);
 
         let local_lbl = vol_local_val_label.clone();
         vol_local_scale.connect_value_changed(move |scale| {
@@ -178,6 +230,11 @@ impl ControlsBar {
             vol_local_scale,
             vol_mic_scale,
             passthrough_switch,
+            mic_drop_down,
+            mic_sources: std::cell::RefCell::new(microphones),
+            progress_scale,
+            time_current_label,
+            time_total_label,
         }
     }
 
@@ -209,11 +266,51 @@ impl ControlsBar {
         &self.passthrough_switch
     }
 
+    pub fn mic_drop_down(&self) -> &gtk::DropDown {
+        &self.mic_drop_down
+    }
+
+    pub fn progress_scale(&self) -> &gtk::Scale {
+        &self.progress_scale
+    }
+
     pub fn local_volume(&self) -> f64 {
         self.vol_local_scale.value()
     }
 
     pub fn mic_volume(&self) -> f64 {
         self.vol_mic_scale.value()
+    }
+
+    pub fn selected_microphone_node(&self) -> Option<String> {
+        let idx = self.mic_drop_down.selected() as usize;
+        self.mic_sources
+            .borrow()
+            .get(idx)
+            .map(|m| m.node_name.clone())
+    }
+
+    pub fn set_playback_progress(&self, current_secs: f64, total_secs: f64) {
+        let clamped_total = if total_secs > 0.1 { total_secs } else { 1.0 };
+        let clamped_curr = current_secs.clamp(0.0, clamped_total);
+        self.progress_scale.set_range(0.0, clamped_total);
+        self.progress_scale.set_value(clamped_curr);
+
+        let cur_m = (clamped_curr.round() as u64) / 60;
+        let cur_s = (clamped_curr.round() as u64) % 60;
+        self.time_current_label
+            .set_label(&format!("{:02}:{:02}", cur_m, cur_s));
+
+        let tot_m = (clamped_total.round() as u64) / 60;
+        let tot_s = (clamped_total.round() as u64) % 60;
+        self.time_total_label
+            .set_label(&format!("{:02}:{:02}", tot_m, tot_s));
+    }
+
+    pub fn reset_progress(&self) {
+        self.progress_scale.set_range(0.0, 100.0);
+        self.progress_scale.set_value(0.0);
+        self.time_current_label.set_label("00:00");
+        self.time_total_label.set_label("00:00");
     }
 }

@@ -10,6 +10,7 @@ pub struct AppConfig {
     pub volume_local: f64,
     pub volume_mic: f64,
     pub mic_passthrough: bool,
+    pub selected_microphone: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -19,6 +20,7 @@ impl Default for AppConfig {
             volume_local: 0.8,
             volume_mic: 1.0,
             mic_passthrough: false,
+            selected_microphone: None,
         }
     }
 }

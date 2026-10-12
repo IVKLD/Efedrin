@@ -13,6 +13,9 @@ use std::path::Path;
 use std::rc::Rc;
 use std::time::Duration;
 
+use std::cell::Cell;
+use std::time::Instant;
+
 pub struct MainWindow {
     window: adw::ApplicationWindow,
     config: Rc<RefCell<AppConfig>>,
@@ -23,6 +26,10 @@ pub struct MainWindow {
     count_label: gtk::Label,
     controls: Rc<ControlsBar>,
     current_playing_id: Rc<RefCell<Option<String>>>,
+    current_playing_item: Rc<RefCell<Option<SoundItem>>>,
+    playback_start: Rc<Cell<Option<Instant>>>,
+    playback_offset: Rc<Cell<f64>>,
+    is_user_seeking: Rc<Cell<bool>>,
 }
 
 impl MainWindow {
@@ -30,11 +37,16 @@ impl MainWindow {
         let config = Rc::new(RefCell::new(AppConfig::load()));
         let library = Rc::new(RefCell::new(SoundLibrary::new()));
         let current_playing_id = Rc::new(RefCell::new(None));
+        let current_playing_item = Rc::new(RefCell::new(None));
+        let playback_start = Rc::new(Cell::new(None));
+        let playback_offset = Rc::new(Cell::new(0.0));
+        let is_user_seeking = Rc::new(Cell::new(false));
 
         let cfg = config.borrow();
         let initial_vol_local = cfg.volume_local;
         let initial_vol_mic = cfg.volume_mic;
         let initial_passthrough = cfg.mic_passthrough;
+        let initial_mic = cfg.selected_microphone.clone();
         drop(cfg);
 
         let window = adw::ApplicationWindow::builder()
@@ -52,10 +64,13 @@ impl MainWindow {
 
         main_box.append(header.widget());
 
+        let mics = audio_engine.list_microphones();
         let controls = Rc::new(ControlsBar::new(
             initial_vol_local,
             initial_vol_mic,
             initial_passthrough,
+            mics,
+            initial_mic.as_deref(),
         ));
         let sound_grid = Rc::new(SoundGrid::new());
 
@@ -105,18 +120,41 @@ impl MainWindow {
             count_label,
             controls,
             current_playing_id,
+            current_playing_item,
+            playback_start,
+            playback_offset,
+            is_user_seeking,
         });
 
         {
             let engine_poll = main_window.audio_engine.clone();
             let current_id_poll = main_window.current_playing_id.clone();
+            let current_item_poll = main_window.current_playing_item.clone();
             let grid_poll = main_window.sound_grid.clone();
             let status_lbl_poll = main_window.status_label.clone();
-            glib::timeout_add_local(Duration::from_millis(150), move || {
-                if current_id_poll.borrow().is_some() && !engine_poll.is_playing() {
-                    *current_id_poll.borrow_mut() = None;
-                    grid_poll.set_active_sound(None);
-                    status_lbl_poll.set_label("Ready");
+            let controls_poll = main_window.controls.clone();
+            let start_poll = main_window.playback_start.clone();
+            let offset_poll = main_window.playback_offset.clone();
+            let seeking_poll = main_window.is_user_seeking.clone();
+
+            glib::timeout_add_local(Duration::from_millis(100), move || {
+                if current_id_poll.borrow().is_some() {
+                    if !engine_poll.is_playing() {
+                        *current_id_poll.borrow_mut() = None;
+                        *current_item_poll.borrow_mut() = None;
+                        start_poll.set(None);
+                        offset_poll.set(0.0);
+                        grid_poll.set_active_sound(None);
+                        status_lbl_poll.set_label("Ready");
+                        controls_poll.reset_progress();
+                    } else if !seeking_poll.get() {
+                        if let (Some(started), Some(item)) =
+                            (start_poll.get(), current_item_poll.borrow().as_ref())
+                        {
+                            let elapsed = offset_poll.get() + started.elapsed().as_secs_f64();
+                            controls_poll.set_playback_progress(elapsed, item.duration_secs);
+                        }
+                    }
                 }
                 glib::ControlFlow::Continue
             });
@@ -125,7 +163,9 @@ impl MainWindow {
         main_window.setup_event_handlers(&header);
 
         if initial_passthrough {
-            let _ = main_window.audio_engine.set_mic_passthrough(true);
+            let _ = main_window
+                .audio_engine
+                .set_mic_passthrough(true, initial_mic.as_deref());
         }
 
         let initial_dir = main_window.config.borrow().sound_directory.clone();
@@ -200,22 +240,47 @@ impl MainWindow {
         let engine_pt = this.audio_engine.clone();
         let cfg_pt = this.config.clone();
         let status_lbl_pt = this.status_label.clone();
+        let controls_pt = this.controls.clone();
         this.controls
             .passthrough_switch()
             .connect_state_set(move |_, state| {
-                let res = engine_pt.set_mic_passthrough(state);
+                let selected_mic = controls_pt.selected_microphone_node();
+                let res = engine_pt.set_mic_passthrough(state, selected_mic.as_deref());
                 cfg_pt.borrow_mut().mic_passthrough = state;
                 let _ = cfg_pt.borrow().save();
 
                 if state {
-                    status_lbl_pt.set_label("Physical microphone mixed into virtual microphone");
+                    status_lbl_pt.set_label("Microphone passthrough enabled");
                 } else {
-                    status_lbl_pt.set_label("Physical microphone passthrough disabled");
+                    status_lbl_pt.set_label("Microphone passthrough disabled");
                 }
 
                 if let Err(e) = res {
                     eprintln!("Error toggling mic passthrough: {}", e);
                 }
+                glib::Propagation::Proceed
+            });
+
+        let engine_mic_change = this.audio_engine.clone();
+        let cfg_mic_change = this.config.clone();
+        let controls_mic_change = this.controls.clone();
+        this.controls
+            .mic_drop_down()
+            .connect_selected_notify(move |_| {
+                let selected_node = controls_mic_change.selected_microphone_node();
+                cfg_mic_change.borrow_mut().selected_microphone = selected_node.clone();
+                let _ = cfg_mic_change.borrow().save();
+
+                if controls_mic_change.passthrough_switch().is_active() {
+                    let _ = engine_mic_change.set_mic_passthrough(true, selected_node.as_deref());
+                }
+            });
+
+        let this_seek = this.clone();
+        this.controls
+            .progress_scale()
+            .connect_change_value(move |_, _, target_val| {
+                this_seek.seek_playback(target_val);
                 glib::Propagation::Proceed
             });
 
@@ -307,9 +372,16 @@ impl MainWindow {
         let vol_local = self.controls.local_volume();
         let vol_mic = self.controls.mic_volume();
 
-        match self.audio_engine.play_sound(&item.path, vol_local, vol_mic) {
+        match self
+            .audio_engine
+            .play_sound(&item.path, vol_local, vol_mic, 0.0)
+        {
             Ok(_) => {
                 *self.current_playing_id.borrow_mut() = Some(item.id.clone());
+                *self.current_playing_item.borrow_mut() = Some(item.clone());
+                self.playback_start.set(Some(Instant::now()));
+                self.playback_offset.set(0.0);
+                self.controls.set_playback_progress(0.0, item.duration_secs);
                 self.sound_grid.set_active_sound(Some(&item.id));
                 self.status_label.set_label(&format!(
                     "Playing: {} (Local: {:.0}%, Mic: {:.0}%)",
@@ -320,6 +392,10 @@ impl MainWindow {
             }
             Err(e) => {
                 *self.current_playing_id.borrow_mut() = None;
+                *self.current_playing_item.borrow_mut() = None;
+                self.playback_start.set(None);
+                self.playback_offset.set(0.0);
+                self.controls.reset_progress();
                 self.sound_grid.set_active_sound(None);
                 self.status_label
                     .set_label(&format!("Playback error: {}", e));
@@ -327,9 +403,34 @@ impl MainWindow {
         }
     }
 
+    fn seek_playback(self: &Rc<Self>, target_secs: f64) {
+        let current_item = self.current_playing_item.borrow().clone();
+        if let Some(item) = current_item {
+            self.is_user_seeking.set(true);
+            let vol_local = self.controls.local_volume();
+            let vol_mic = self.controls.mic_volume();
+            let clamped = target_secs.clamp(0.0, item.duration_secs);
+
+            if let Ok(_) = self
+                .audio_engine
+                .play_sound(&item.path, vol_local, vol_mic, clamped)
+            {
+                self.playback_offset.set(clamped);
+                self.playback_start.set(Some(Instant::now()));
+                self.controls
+                    .set_playback_progress(clamped, item.duration_secs);
+            }
+            self.is_user_seeking.set(false);
+        }
+    }
+
     fn stop_all(self: &Rc<Self>) {
         self.audio_engine.stop_all();
         *self.current_playing_id.borrow_mut() = None;
+        *self.current_playing_item.borrow_mut() = None;
+        self.playback_start.set(None);
+        self.playback_offset.set(0.0);
+        self.controls.reset_progress();
         self.sound_grid.set_active_sound(None);
         self.status_label.set_label("All playback stopped");
     }

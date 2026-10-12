@@ -34,7 +34,13 @@ impl AudioEngine {
         }
     }
 
-    pub fn play_sound(&self, sound_path: &Path, volume_local: f64, volume_mic: f64) -> Result<()> {
+    pub fn play_sound(
+        &self,
+        sound_path: &Path,
+        volume_local: f64,
+        volume_mic: f64,
+        start_seconds: f64,
+    ) -> Result<()> {
         if !sound_path.exists() {
             return Err(AppError::NotFound(format!(
                 "Sound file not found: {}",
@@ -61,32 +67,88 @@ impl AudioEngine {
 
         if volume_local > 0.001 {
             let clamped_vol_local = volume_local.clamp(0.0, 2.0);
-            let child_local = Command::new("pw-play")
-                .arg(format!("--properties=node.name=\"{}\"", LOCAL_STREAM_NAME))
-                .arg(format!("--volume={:.3}", clamped_vol_local))
-                .arg(path_str)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .map_err(|e| AppError::Audio(format!("Failed to play local stream: {}", e)))?;
+            let mut cmd = Command::new("pw-play");
+            cmd.arg(format!("--properties=node.name=\"{}\"", LOCAL_STREAM_NAME))
+                .arg(format!("--volume={:.3}", clamped_vol_local));
+
+            let child_local = if start_seconds > 0.1 {
+                let ffmpeg = Command::new("ffmpeg")
+                    .args([
+                        "-ss",
+                        &format!("{:.3}", start_seconds),
+                        "-i",
+                        path_str,
+                        "-f",
+                        "wav",
+                        "-",
+                    ])
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .map_err(|e| AppError::Audio(format!("Failed to spawn ffmpeg: {}", e)))?;
+
+                let child = cmd
+                    .arg("-")
+                    .stdin(ffmpeg.stdout.unwrap())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .map_err(|e| AppError::Audio(format!("Failed to play local stream: {}", e)))?;
+                child
+            } else {
+                cmd.arg(path_str)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .map_err(|e| AppError::Audio(format!("Failed to play local stream: {}", e)))?
+            };
             spawned.push(child_local);
         }
 
         if volume_mic > 0.001 {
             let clamped_vol_mic = volume_mic.clamp(0.0, 2.0);
-            let child_mic = Command::new("pw-play")
-                .arg(format!("--target={}", SINK_NODE_NAME))
+            let mut cmd = Command::new("pw-play");
+            cmd.arg(format!("--target={}", SINK_NODE_NAME))
                 .arg(format!("--properties=node.name=\"{}\"", MIC_STREAM_NAME))
-                .arg(format!("--volume={:.3}", clamped_vol_mic))
-                .arg(path_str)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .map_err(|e| {
-                    AppError::Audio(format!("Failed to play virtual mic stream: {}", e))
-                })?;
+                .arg(format!("--volume={:.3}", clamped_vol_mic));
+
+            let child_mic = if start_seconds > 0.1 {
+                let ffmpeg = Command::new("ffmpeg")
+                    .args([
+                        "-ss",
+                        &format!("{:.3}", start_seconds),
+                        "-i",
+                        path_str,
+                        "-f",
+                        "wav",
+                        "-",
+                    ])
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .map_err(|e| AppError::Audio(format!("Failed to spawn ffmpeg: {}", e)))?;
+
+                let child = cmd
+                    .arg("-")
+                    .stdin(ffmpeg.stdout.unwrap())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .map_err(|e| {
+                        AppError::Audio(format!("Failed to play virtual mic stream: {}", e))
+                    })?;
+                child
+            } else {
+                cmd.arg(path_str)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .map_err(|e| {
+                        AppError::Audio(format!("Failed to play virtual mic stream: {}", e))
+                    })?
+            };
             spawned.push(child_mic);
         }
 
@@ -95,6 +157,18 @@ impl AudioEngine {
         }
 
         Ok(())
+    }
+
+    pub fn list_microphones(&self) -> Vec<crate::audio::pipewire::MicrophoneSource> {
+        crate::audio::pipewire::PipeWireManager::list_microphones()
+    }
+
+    pub fn set_mic_passthrough(&self, enabled: bool, selected_mic: Option<&str>) -> Result<()> {
+        let pw = self
+            .pipewire_manager
+            .lock()
+            .map_err(|e| AppError::Audio(format!("Mutex lock error: {}", e)))?;
+        pw.set_mic_passthrough(enabled, selected_mic)
     }
 
     fn find_node_ids_by_name(target_name: &str) -> Vec<String> {
@@ -164,23 +238,6 @@ impl AudioEngine {
         self.clean_finished_processes();
         if let Ok(procs) = self.active_processes.lock() {
             !procs.is_empty()
-        } else {
-            false
-        }
-    }
-
-    pub fn set_mic_passthrough(&self, enabled: bool) -> Result<()> {
-        let pw = self
-            .pipewire_manager
-            .lock()
-            .map_err(|e| AppError::Audio(format!("Mutex lock error: {}", e)))?;
-        pw.set_mic_passthrough(enabled)
-    }
-
-    #[allow(dead_code)]
-    pub fn is_mic_passthrough_enabled(&self) -> bool {
-        if let Ok(pw) = self.pipewire_manager.lock() {
-            pw.is_mic_passthrough_enabled()
         } else {
             false
         }

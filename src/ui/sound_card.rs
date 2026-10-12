@@ -61,8 +61,14 @@ impl SoundCardWidget {
             .css_classes(["heading"])
             .build();
 
+        let subtitle = if item.duration_secs > 0.0 {
+            format!("{} • {}", item.formatted_duration, item.formatted_size)
+        } else {
+            item.formatted_size.clone()
+        };
+
         let size_label = gtk::Label::builder()
-            .label(&item.formatted_size)
+            .label(&subtitle)
             .halign(gtk::Align::Start)
             .css_classes(["caption", "dim-label"])
             .build();
