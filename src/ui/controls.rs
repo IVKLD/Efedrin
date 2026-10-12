@@ -133,7 +133,7 @@ impl ControlsBar {
             .css_classes(["caption"])
             .build();
 
-        let vol_local_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1.5, 0.05);
+        let vol_local_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 3.0, 0.05);
         vol_local_scale.set_value(initial_vol_local);
         vol_local_scale.set_hexpand(true);
         vol_local_scale.set_draw_value(false);
@@ -164,7 +164,7 @@ impl ControlsBar {
             .css_classes(["caption"])
             .build();
 
-        let vol_mic_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1.5, 0.05);
+        let vol_mic_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 3.0, 0.05);
         vol_mic_scale.set_value(initial_vol_mic);
         vol_mic_scale.set_hexpand(true);
         vol_mic_scale.set_draw_value(false);

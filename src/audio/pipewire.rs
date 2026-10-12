@@ -89,6 +89,10 @@ impl PipeWireManager {
 
         thread::sleep(Duration::from_millis(200));
 
+        let _ = Command::new("wpctl")
+            .args(["set-volume", "@DEFAULT_AUDIO_SOURCE@", "1.0"])
+            .output();
+
         Ok(())
     }
 
