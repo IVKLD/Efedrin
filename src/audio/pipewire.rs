@@ -68,11 +68,11 @@ impl PipeWireManager {
         thread::sleep(Duration::from_millis(50));
 
         let capture_props = format!(
-            "media.class=Audio/Sink node.name={} node.description=\"Efedrin Soundpad Sink\" audio.rate=48000 audio.channels=2",
+            "media.class=Audio/Sink node.name={} node.description=\"Efedrin Soundpad Sink\"",
             SINK_NODE_NAME
         );
         let playback_props = format!(
-            "media.class=Audio/Source node.name={} node.description=\"Efedrin Virtual Microphone\" audio.rate=48000 audio.channels=2",
+            "media.class=Audio/Source node.name={} node.description=\"Efedrin Virtual Microphone\"",
             SOURCE_NODE_NAME
         );
 
@@ -97,6 +97,9 @@ impl PipeWireManager {
             let _ = child.kill();
             let _ = child.wait();
         }
+        let _ = Command::new("pkill")
+            .args(["-f", "node.name=efedrin_soundpad"])
+            .output();
         self.mic_passthrough_enabled.store(false, Ordering::SeqCst);
     }
 }
@@ -189,39 +192,66 @@ impl PipeWireManager {
         result
     }
 
-    pub fn set_mic_passthrough(&self, enable: bool, selected_mic_node: Option<&str>) -> Result<()> {
-        let all_mics = Self::list_microphones();
-        let target_in_left = format!("{}:playback_FL", SINK_NODE_NAME);
-        let target_in_right = format!("{}:playback_FR", SINK_NODE_NAME);
+    fn disconnect_soundpad_mic_inputs() {
+        if let Ok(output) = Command::new("pw-link").arg("-l").output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let mut current_port: Option<String> = None;
 
-        for mic in &all_mics {
-            for port in &mic.ports {
-                let _ = Command::new("pw-link")
-                    .args(["-d", port, &target_in_left])
-                    .output();
-                let _ = Command::new("pw-link")
-                    .args(["-d", port, &target_in_right])
-                    .output();
+            for line in stdout.lines() {
+                if !line.starts_with("  |") {
+                    let trimmed = line.trim();
+                    if !trimmed.is_empty() {
+                        current_port = Some(trimmed.to_string());
+                    }
+                } else if let Some(dest) = &current_port {
+                    if dest.starts_with(&format!("{}:playback_", SINK_NODE_NAME)) {
+                        let trimmed = line.trim();
+                        if let Some(src) = trimmed.strip_prefix("|<- ") {
+                            let src = src.trim();
+                            if !src.starts_with("efedrin_mic_stream:") {
+                                let _ = Command::new("pw-link").args(["-d", src, dest]).output();
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
+
+    pub fn set_mic_passthrough(&self, enable: bool, selected_mic_node: Option<&str>) -> Result<()> {
+        Self::disconnect_soundpad_mic_inputs();
 
         if enable {
+            let all_mics = Self::list_microphones();
             let active_mic = if let Some(node) = selected_mic_node {
                 all_mics.iter().find(|m| m.node_name == node)
             } else {
                 all_mics.first()
             };
 
+            let target_in_left = format!("{}:playback_FL", SINK_NODE_NAME);
+            let target_in_right = format!("{}:playback_FR", SINK_NODE_NAME);
+
             if let Some(mic) = active_mic {
-                for port in &mic.ports {
-                    if port.ends_with("_FL") || port.ends_with("AUX0") || port.ends_with("1") {
-                        let _ = Command::new("pw-link")
-                            .args([port, &target_in_left])
-                            .output();
-                    } else {
-                        let _ = Command::new("pw-link")
-                            .args([port, &target_in_right])
-                            .output();
+                if mic.ports.len() == 1 {
+                    let port = &mic.ports[0];
+                    let _ = Command::new("pw-link")
+                        .args([port, &target_in_left])
+                        .output();
+                    let _ = Command::new("pw-link")
+                        .args([port, &target_in_right])
+                        .output();
+                } else {
+                    for port in &mic.ports {
+                        if port.ends_with("_FL") || port.ends_with("AUX0") || port.ends_with("1") {
+                            let _ = Command::new("pw-link")
+                                .args([port, &target_in_left])
+                                .output();
+                        } else {
+                            let _ = Command::new("pw-link")
+                                .args([port, &target_in_right])
+                                .output();
+                        }
                     }
                 }
             }
