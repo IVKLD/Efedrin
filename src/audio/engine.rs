@@ -47,6 +47,7 @@ impl AudioEngine {
             pw.start()?;
         }
 
+        self.stop_all();
         self.clean_finished_processes();
 
         let path_str = sound_path

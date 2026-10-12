@@ -1,8 +1,9 @@
 use crate::sound::SoundItem;
-use crate::ui::sound_card::SoundCard;
+use crate::ui::sound_card::SoundCardWidget;
 use gtk4 as gtk;
 use gtk4::prelude::*;
 use libadwaita as adw;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 pub struct SoundGrid {
@@ -10,6 +11,7 @@ pub struct SoundGrid {
     flow_box: gtk::FlowBox,
     status_page: adw::StatusPage,
     scrolled_window: gtk::ScrolledWindow,
+    cards: RefCell<Vec<SoundCardWidget>>,
 }
 
 impl SoundGrid {
@@ -58,6 +60,7 @@ impl SoundGrid {
             flow_box,
             status_page,
             scrolled_window,
+            cards: RefCell::new(Vec::new()),
         }
     }
 
@@ -65,13 +68,14 @@ impl SoundGrid {
         &self.container
     }
 
-    pub fn populate<F>(&self, sounds: &[SoundItem], on_play: Rc<F>)
+    pub fn populate<F>(&self, sounds: &[SoundItem], on_play: Rc<F>, current_active_id: Option<&str>)
     where
         F: Fn(&SoundItem) + 'static,
     {
         while let Some(child) = self.flow_box.first_child() {
             self.flow_box.remove(&child);
         }
+        self.cards.borrow_mut().clear();
 
         if sounds.is_empty() {
             self.status_page.set_visible(true);
@@ -80,13 +84,26 @@ impl SoundGrid {
             self.status_page.set_visible(false);
             self.scrolled_window.set_visible(true);
 
+            let mut new_cards = Vec::with_capacity(sounds.len());
             for item in sounds {
                 let on_play_clone = on_play.clone();
-                let card = SoundCard::create(item, move |clicked_item| {
+                let card = SoundCardWidget::create(item, move |clicked_item| {
                     on_play_clone(clicked_item);
                 });
-                self.flow_box.insert(&card, -1);
+                if current_active_id.map_or(false, |id| id == item.id) {
+                    card.set_playing(true);
+                }
+                self.flow_box.insert(&card.button, -1);
+                new_cards.push(card);
             }
+            *self.cards.borrow_mut() = new_cards;
+        }
+    }
+
+    pub fn set_active_sound(&self, active_id: Option<&str>) {
+        for card in self.cards.borrow().iter() {
+            let is_current = active_id.map_or(false, |id| id == card.item.id);
+            card.set_playing(is_current);
         }
     }
 }

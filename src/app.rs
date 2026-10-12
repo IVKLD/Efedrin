@@ -21,11 +21,22 @@ const CUSTOM_CSS: &str = "
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 }
 
+.sound-card-button.is-playing {
+    border: 2px solid @accent_color;
+    background-color: alpha(@accent_color, 0.18);
+    box-shadow: 0 0 14px alpha(@accent_color, 0.45);
+}
+
 .badge {
     padding: 2px 8px;
     border-radius: 8px;
     background-color: alpha(currentColor, 0.12);
     font-weight: bold;
+}
+
+.badge.badge-active {
+    background-color: @accent_color;
+    color: #ffffff;
 }
 
 .pill {

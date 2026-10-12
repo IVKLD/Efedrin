@@ -11,6 +11,7 @@ use libadwaita::prelude::*;
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
+use std::time::Duration;
 
 pub struct MainWindow {
     window: adw::ApplicationWindow,
@@ -21,12 +22,14 @@ pub struct MainWindow {
     status_label: gtk::Label,
     count_label: gtk::Label,
     controls: Rc<ControlsBar>,
+    current_playing_id: Rc<RefCell<Option<String>>>,
 }
 
 impl MainWindow {
     pub fn new(app: &adw::Application, audio_engine: AudioEngine) -> Rc<Self> {
         let config = Rc::new(RefCell::new(AppConfig::load()));
         let library = Rc::new(RefCell::new(SoundLibrary::new()));
+        let current_playing_id = Rc::new(RefCell::new(None));
 
         let cfg = config.borrow();
         let initial_vol_local = cfg.volume_local;
@@ -101,7 +104,23 @@ impl MainWindow {
             status_label,
             count_label,
             controls,
+            current_playing_id,
         });
+
+        {
+            let engine_poll = main_window.audio_engine.clone();
+            let current_id_poll = main_window.current_playing_id.clone();
+            let grid_poll = main_window.sound_grid.clone();
+            let status_lbl_poll = main_window.status_label.clone();
+            glib::timeout_add_local(Duration::from_millis(150), move || {
+                if current_id_poll.borrow().is_some() && !engine_poll.is_playing() {
+                    *current_id_poll.borrow_mut() = None;
+                    grid_poll.set_active_sound(None);
+                    status_lbl_poll.set_label("Ready");
+                }
+                glib::ControlFlow::Continue
+            });
+        }
 
         main_window.setup_event_handlers(&header);
 
@@ -269,15 +288,23 @@ impl MainWindow {
             this.play_sound(item);
         });
 
-        self.sound_grid.populate(items, on_play);
+        self.sound_grid
+            .populate(items, on_play, self.current_playing_id.borrow().as_deref());
     }
 
     fn play_sound(self: &Rc<Self>, item: &SoundItem) {
+        if self.current_playing_id.borrow().as_deref() == Some(&item.id) {
+            self.stop_all();
+            return;
+        }
+
         let vol_local = self.controls.local_volume();
         let vol_mic = self.controls.mic_volume();
 
         match self.audio_engine.play_sound(&item.path, vol_local, vol_mic) {
             Ok(_) => {
+                *self.current_playing_id.borrow_mut() = Some(item.id.clone());
+                self.sound_grid.set_active_sound(Some(&item.id));
                 self.status_label.set_label(&format!(
                     "Playing: {} (Local: {:.0}%, Mic: {:.0}%)",
                     item.title,
@@ -286,6 +313,8 @@ impl MainWindow {
                 ));
             }
             Err(e) => {
+                *self.current_playing_id.borrow_mut() = None;
+                self.sound_grid.set_active_sound(None);
                 self.status_label
                     .set_label(&format!("Playback error: {}", e));
             }
@@ -294,6 +323,8 @@ impl MainWindow {
 
     fn stop_all(self: &Rc<Self>) {
         self.audio_engine.stop_all();
+        *self.current_playing_id.borrow_mut() = None;
+        self.sound_grid.set_active_sound(None);
         self.status_label.set_label("All playback stopped");
     }
 }

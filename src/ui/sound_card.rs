@@ -2,10 +2,16 @@ use crate::sound::SoundItem;
 use gtk4 as gtk;
 use gtk4::prelude::*;
 
-pub struct SoundCard;
+#[derive(Clone)]
+pub struct SoundCardWidget {
+    pub button: gtk::Button,
+    pub icon: gtk::Image,
+    pub badge: gtk::Label,
+    pub item: SoundItem,
+}
 
-impl SoundCard {
-    pub fn create<F>(item: &SoundItem, on_play: F) -> gtk::Button
+impl SoundCardWidget {
+    pub fn create<F>(item: &SoundItem, on_play: F) -> Self
     where
         F: Fn(&SoundItem) + 'static,
     {
@@ -80,6 +86,26 @@ impl SoundCard {
         });
         button.add_controller(gesture);
 
-        button
+        Self {
+            button,
+            icon,
+            badge,
+            item: item.clone(),
+        }
+    }
+
+    pub fn set_playing(&self, playing: bool) {
+        if playing {
+            self.button.add_css_class("is-playing");
+            self.icon.set_icon_name(Some("audio-volume-high-symbolic"));
+            self.badge.set_label("PLAYING");
+            self.badge.add_css_class("badge-active");
+        } else {
+            self.button.remove_css_class("is-playing");
+            self.icon
+                .set_icon_name(Some("media-playback-start-symbolic"));
+            self.badge.set_label(&self.item.extension);
+            self.badge.remove_css_class("badge-active");
+        }
     }
 }
