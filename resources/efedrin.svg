@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3584e4"/>
+      <stop offset="100%" stop-color="#1c71d8"/>
+    </linearGradient>
+    <linearGradient id="padGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.05"/>
+    </linearGradient>
+  </defs>
+  <!-- Background rounded rectangle -->
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#bgGrad)"/>
+  
+  <!-- 2x2 Soundpad Matrix Buttons -->
+  <rect x="22" y="22" width="38" height="38" rx="10" fill="url(#padGrad)" stroke="#ffffff" stroke-width="2" stroke-opacity="0.4"/>
+  <rect x="68" y="22" width="38" height="38" rx="10" fill="url(#padGrad)" stroke="#ffffff" stroke-width="2" stroke-opacity="0.4"/>
+  <rect x="22" y="68" width="38" height="38" rx="10" fill="url(#padGrad)" stroke="#ffffff" stroke-width="2" stroke-opacity="0.4"/>
+  <rect x="68" y="68" width="38" height="38" rx="10" fill="url(#padGrad)" stroke="#ffffff" stroke-width="2" stroke-opacity="0.4"/>
+
+  <!-- Speaker / Sound Wave Icon in top-left pad -->
+  <path d="M 33 41 L 39 41 L 45 35 L 45 47 L 39 41 Z" fill="#ffffff"/>
+  <path d="M 48 37 C 50 39 50 43 48 45" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Microphone Icon in bottom-right pad -->
+  <rect x="83" y="77" width="8" height="13" rx="4" fill="#ffffff"/>
+  <path d="M 80 84 C 80 89 94 89 94 84" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+  <line x1="87" y1="89" x2="87" y2="94" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+</svg>

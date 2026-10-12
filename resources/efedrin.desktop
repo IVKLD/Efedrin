@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Efedrin Soundpad
+Comment=PipeWire Soundpad with Virtual Microphone and Dual Routing
+Exec=efedrin
+Icon=efedrin
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;Player;
+Keywords=soundpad;soundboard;pipewire;audio;microphone;
+StartupNotify=true
