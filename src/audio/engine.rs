@@ -4,7 +4,6 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
-/// Dual-routing Audio Engine directing sound to local playback and virtual microphone
 #[derive(Clone)]
 pub struct AudioEngine {
     pipewire_manager: Arc<Mutex<PipeWireManager>>,
@@ -22,18 +21,16 @@ impl AudioEngine {
         })
     }
 
-    /// Prunes finished child processes from the tracking list
     fn clean_finished_processes(&self) {
         if let Ok(mut procs) = self.active_processes.lock() {
             procs.retain_mut(|child| match child.try_wait() {
-                Ok(Some(_)) => false, // Process finished, remove from list
-                Ok(None) => true,     // Process still running, keep
+                Ok(Some(_)) => false,
+                Ok(None) => true,
                 Err(_) => false,
             });
         }
     }
 
-    /// Plays a sound file simultaneously to user headphones and PipeWire virtual microphone
     pub fn play_sound(&self, sound_path: &Path, volume_local: f64, volume_mic: f64) -> Result<()> {
         if !sound_path.exists() {
             return Err(AppError::NotFound(format!(
@@ -42,7 +39,6 @@ impl AudioEngine {
             )));
         }
 
-        // Ensure PipeWire virtual nodes are active
         {
             let mut pw = self
                 .pipewire_manager
@@ -59,7 +55,6 @@ impl AudioEngine {
 
         let mut spawned = Vec::new();
 
-        // 1. Local Playback (Headphones / Default Audio Output)
         if volume_local > 0.001 {
             let clamped_vol_local = volume_local.clamp(0.0, 2.0);
             let child_local = Command::new("pw-play")
@@ -73,7 +68,6 @@ impl AudioEngine {
             spawned.push(child_local);
         }
 
-        // 2. Virtual Microphone Playback (Target: efedrin_soundpad)
         if volume_mic > 0.001 {
             let clamped_vol_mic = volume_mic.clamp(0.0, 2.0);
             let child_mic = Command::new("pw-play")
@@ -84,7 +78,9 @@ impl AudioEngine {
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
-                .map_err(|e| AppError::Audio(format!("Failed to play virtual mic stream: {}", e)))?;
+                .map_err(|e| {
+                    AppError::Audio(format!("Failed to play virtual mic stream: {}", e))
+                })?;
             spawned.push(child_mic);
         }
 
@@ -95,7 +91,6 @@ impl AudioEngine {
         Ok(())
     }
 
-    /// Immediately stops all active sounds playing on local or virtual devices
     pub fn stop_all(&self) {
         if let Ok(mut procs) = self.active_processes.lock() {
             for mut child in procs.drain(..) {
@@ -105,7 +100,6 @@ impl AudioEngine {
         }
     }
 
-    /// Checks if any sound stream is currently active
     #[allow(dead_code)]
     pub fn is_playing(&self) -> bool {
         self.clean_finished_processes();
@@ -116,7 +110,6 @@ impl AudioEngine {
         }
     }
 
-    /// Toggles microphone mixing into the virtual microphone
     pub fn set_mic_passthrough(&self, enabled: bool) -> Result<()> {
         let pw = self
             .pipewire_manager
@@ -125,7 +118,6 @@ impl AudioEngine {
         pw.set_mic_passthrough(enabled)
     }
 
-    /// Queries whether mic passthrough is currently enabled
     #[allow(dead_code)]
     pub fn is_mic_passthrough_enabled(&self) -> bool {
         if let Ok(pw) = self.pipewire_manager.lock() {
@@ -135,7 +127,6 @@ impl AudioEngine {
         }
     }
 
-    /// Shuts down PipeWire virtual nodes on application exit
     pub fn shutdown(&self) {
         self.stop_all();
         if let Ok(mut pw) = self.pipewire_manager.lock() {

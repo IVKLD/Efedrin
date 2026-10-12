@@ -8,7 +8,6 @@ use std::time::Duration;
 pub const SINK_NODE_NAME: &str = "efedrin_soundpad";
 pub const SOURCE_NODE_NAME: &str = "efedrin_mic";
 
-/// Manages the lifecycle of PipeWire virtual devices (Sink + Virtual Microphone Source)
 pub struct PipeWireManager {
     loopback_child: Option<Child>,
     mic_passthrough_enabled: Arc<AtomicBool>,
@@ -22,7 +21,6 @@ impl PipeWireManager {
         }
     }
 
-    /// Verifies that required PipeWire CLI tools exist on the system
     pub fn check_prerequisites() -> Result<()> {
         if which::which("pw-loopback").is_err() {
             return Err(AppError::PipeWire(
@@ -42,7 +40,6 @@ impl PipeWireManager {
         Ok(())
     }
 
-    /// Checks if the virtual nodes are currently running and responsive
     pub fn is_running(&mut self) -> bool {
         if let Some(child) = &mut self.loopback_child {
             match child.try_wait() {
@@ -57,7 +54,6 @@ impl PipeWireManager {
         }
     }
 
-    /// Spawns pw-loopback to instantiate efedrin_soundpad (Sink) and efedrin_mic (Virtual Mic Source)
     pub fn start(&mut self) -> Result<()> {
         if self.is_running() {
             return Ok(());
@@ -65,7 +61,6 @@ impl PipeWireManager {
 
         Self::check_prerequisites()?;
 
-        // Clean up any stale instances with the same node names if they were left behind
         let _ = Command::new("pkill")
             .args(["-f", "node.name=efedrin_soundpad"])
             .output();
@@ -88,19 +83,15 @@ impl PipeWireManager {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|e| {
-                AppError::PipeWire(format!("Failed to spawn pw-loopback: {}", e))
-            })?;
+            .map_err(|e| AppError::PipeWire(format!("Failed to spawn pw-loopback: {}", e)))?;
 
         self.loopback_child = Some(child);
 
-        // Give PipeWire daemon a short moment to register the nodes in the graph
         thread::sleep(Duration::from_millis(200));
 
         Ok(())
     }
 
-    /// Stops the pw-loopback subprocess and cleans up virtual nodes
     pub fn stop(&mut self) {
         if let Some(mut child) = self.loopback_child.take() {
             let _ = child.kill();
@@ -109,7 +100,6 @@ impl PipeWireManager {
         self.mic_passthrough_enabled.store(false, Ordering::SeqCst);
     }
 
-    /// Discovers hardware microphone capture ports in PipeWire
     fn discover_hardware_mic_ports() -> Vec<String> {
         let output = match Command::new("pw-link").arg("-o").output() {
             Ok(out) => out,
@@ -121,7 +111,6 @@ impl PipeWireManager {
 
         for line in stdout.lines() {
             let trimmed = line.trim();
-            // Look for alsa_input capture ports, excluding our own virtual microphone and monitor ports
             if trimmed.contains("alsa_input")
                 && (trimmed.contains(":capture_") || trimmed.contains(":input_"))
                 && !trimmed.contains("efedrin")
@@ -133,7 +122,6 @@ impl PipeWireManager {
         mic_ports
     }
 
-    /// Configures mixing of physical microphone into the virtual microphone
     pub fn set_mic_passthrough(&self, enable: bool) -> Result<()> {
         let mic_ports = Self::discover_hardware_mic_ports();
         let target_in_left = format!("{}:playback_FL", SINK_NODE_NAME);
@@ -141,7 +129,6 @@ impl PipeWireManager {
 
         for port in &mic_ports {
             if enable {
-                // Link physical mic port to virtual soundpad sink input
                 if port.ends_with("_FL") || port.ends_with("AUX0") || port.ends_with("1") {
                     let _ = Command::new("pw-link")
                         .args([port, &target_in_left])
@@ -152,7 +139,6 @@ impl PipeWireManager {
                         .output();
                 }
             } else {
-                // Disconnect physical mic from virtual soundpad sink
                 let _ = Command::new("pw-link")
                     .args(["-d", port, &target_in_left])
                     .output();

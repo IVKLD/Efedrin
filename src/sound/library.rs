@@ -55,7 +55,6 @@ impl SoundLibrary {
         Self { items: Vec::new() }
     }
 
-    /// Recursively scans a directory for audio files
     pub fn scan_directory(&mut self, directory: &Path) -> Result<usize> {
         if !directory.exists() || !directory.is_dir() {
             return Err(AppError::NotFound(format!(
@@ -90,7 +89,6 @@ impl SoundLibrary {
         &self.items
     }
 
-    /// Filters sound items matching query string
     pub fn filter(&self, query: &str) -> Vec<SoundItem> {
         if query.trim().is_empty() {
             return self.items.clone();

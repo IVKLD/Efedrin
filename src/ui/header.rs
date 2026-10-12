@@ -1,5 +1,5 @@
-use gtk4::prelude::*;
 use gtk4 as gtk;
+use gtk4::prelude::*;
 use libadwaita as adw;
 
 pub struct Header {
@@ -19,7 +19,6 @@ impl Header {
             .build();
         header_bar.set_title_widget(Some(&window_title));
 
-        // Stop All button on start (left) side
         let stop_button = gtk::Button::builder()
             .icon_name("media-playback-stop-symbolic")
             .label("Stop All")
@@ -28,7 +27,6 @@ impl Header {
             .build();
         header_bar.pack_start(&stop_button);
 
-        // PipeWire indicator badge on end (right) side
         let status_pill = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .spacing(6)

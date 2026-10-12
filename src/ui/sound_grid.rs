@@ -1,7 +1,7 @@
 use crate::sound::SoundItem;
 use crate::ui::sound_card::SoundCard;
-use gtk4::prelude::*;
 use gtk4 as gtk;
+use gtk4::prelude::*;
 use libadwaita as adw;
 use std::rc::Rc;
 
@@ -65,12 +65,10 @@ impl SoundGrid {
         &self.container
     }
 
-    /// Repopulates the sound grid with given sound items
     pub fn populate<F>(&self, sounds: &[SoundItem], on_play: Rc<F>)
     where
         F: Fn(&SoundItem) + 'static,
     {
-        // Clear previous children
         while let Some(child) = self.flow_box.first_child() {
             self.flow_box.remove(&child);
         }

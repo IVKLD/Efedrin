@@ -1,5 +1,5 @@
-use gtk4::prelude::*;
 use gtk4 as gtk;
+use gtk4::prelude::*;
 
 pub struct ControlsBar {
     container: gtk::Box,
@@ -22,13 +22,11 @@ impl ControlsBar {
             .margin_bottom(8)
             .build();
 
-        // Row 1: Folder Selector + Search Bar + Mic Passthrough Toggle
         let row1 = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .spacing(12)
             .build();
 
-        // Folder button
         let folder_button = gtk::Button::builder()
             .tooltip_text("Open folder containing audio files")
             .css_classes(["flat"])
@@ -54,13 +52,11 @@ impl ControlsBar {
         folder_btn_box.append(&folder_label);
         folder_button.set_child(Some(&folder_btn_box));
 
-        // Search entry
         let search_entry = gtk::SearchEntry::builder()
             .placeholder_text("Search sounds...")
             .hexpand(true)
             .build();
 
-        // Mic passthrough toggle box
         let passthrough_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .spacing(8)
@@ -90,14 +86,12 @@ impl ControlsBar {
         row1.append(&search_entry);
         row1.append(&passthrough_box);
 
-        // Row 2: Dual Volume Sliders (Headphones & Virtual Mic)
         let row2 = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .spacing(24)
             .homogeneous(true)
             .build();
 
-        // Local volume slider box
         let local_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .spacing(10)
@@ -129,7 +123,6 @@ impl ControlsBar {
         local_box.append(&vol_local_scale);
         local_box.append(&vol_local_val_label);
 
-        // Virtual mic volume slider box
         let mic_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .spacing(10)
@@ -167,7 +160,6 @@ impl ControlsBar {
         container.append(&row1);
         container.append(&row2);
 
-        // Synchronize value labels with slider values
         let local_lbl = vol_local_val_label.clone();
         vol_local_scale.connect_value_changed(move |scale| {
             local_lbl.set_label(&format!("{:.0}%", scale.value() * 100.0));

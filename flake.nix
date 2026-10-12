@@ -15,6 +15,7 @@
           pkg-config
           cargo
           rustc
+          rustfmt
           rust-analyzer
           wrapGAppsHook4
         ];

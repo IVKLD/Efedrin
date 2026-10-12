@@ -24,7 +24,6 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
-    /// Returns the standard config directory path: ~/.config/efedrin
     pub fn config_dir() -> PathBuf {
         if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
             if !xdg.is_empty() {
@@ -37,12 +36,10 @@ impl AppConfig {
         PathBuf::from(".config").join("efedrin")
     }
 
-    /// Returns the config file path: ~/.config/efedrin/config.json
     pub fn config_file() -> PathBuf {
         Self::config_dir().join("config.json")
     }
 
-    /// Loads application configuration from disk or returns default if not found
     pub fn load() -> Self {
         let path = Self::config_file();
         if !path.exists() {
@@ -58,7 +55,6 @@ impl AppConfig {
         }
     }
 
-    /// Persists configuration to disk atomically
     pub fn save(&self) -> Result<()> {
         let dir = Self::config_dir();
         if !dir.exists() {

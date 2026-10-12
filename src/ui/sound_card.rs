@@ -1,6 +1,6 @@
 use crate::sound::SoundItem;
-use gtk4::prelude::*;
 use gtk4 as gtk;
+use gtk4::prelude::*;
 
 pub struct SoundCard;
 
@@ -24,7 +24,6 @@ impl SoundCard {
             .margin_end(10)
             .build();
 
-        // Top row: Play icon and format badge
         let top_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .spacing(8)
@@ -46,7 +45,6 @@ impl SoundCard {
         top_box.append(&icon);
         top_box.append(&badge);
 
-        // Title label (bold, ellipsized)
         let title_label = gtk::Label::builder()
             .label(&item.title)
             .ellipsize(gtk4::pango::EllipsizeMode::End)
@@ -55,7 +53,6 @@ impl SoundCard {
             .css_classes(["heading"])
             .build();
 
-        // Details row (file size)
         let size_label = gtk::Label::builder()
             .label(&item.formatted_size)
             .halign(gtk::Align::Start)
@@ -73,17 +70,12 @@ impl SoundCard {
             on_play(&item_clone);
         });
 
-        // Context menu on right click to open file location
-        let gesture = gtk::GestureClick::builder()
-            .button(3) // Right click
-            .build();
+        let gesture = gtk::GestureClick::builder().button(3).build();
 
         let path_clone = item.path.clone();
         gesture.connect_pressed(move |_, _, _, _| {
             if let Some(parent) = path_clone.parent() {
-                let _ = std::process::Command::new("xdg-open")
-                    .arg(parent)
-                    .spawn();
+                let _ = std::process::Command::new("xdg-open").arg(parent).spawn();
             }
         });
         button.add_controller(gesture);
