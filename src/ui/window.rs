@@ -43,11 +43,12 @@ impl MainWindow {
             .build();
 
         let header = Header::new();
-        window.set_titlebar(Some(header.widget()));
 
         let main_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .build();
+
+        main_box.append(header.widget());
 
         let controls = Rc::new(ControlsBar::new(
             initial_vol_local,
