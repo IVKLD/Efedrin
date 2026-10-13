@@ -18,6 +18,50 @@ pub struct ControlsBar {
 }
 
 impl ControlsBar {
+    fn create_volume_channel(
+        icon_name: &str,
+        title: &str,
+        initial_vol: f64,
+    ) -> (gtk::Box, gtk::Scale) {
+        let container = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(10)
+            .build();
+
+        let icon = gtk::Image::builder()
+            .icon_name(icon_name)
+            .pixel_size(16)
+            .build();
+
+        let title_label = gtk::Label::builder()
+            .label(title)
+            .css_classes(["caption"])
+            .build();
+
+        let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 10.0, 0.1);
+        scale.set_value(initial_vol);
+        scale.set_hexpand(true);
+        scale.set_draw_value(false);
+
+        let val_label = gtk::Label::builder()
+            .label(&format!("{:.0}%", initial_vol * 100.0))
+            .width_chars(6)
+            .css_classes(["caption", "numeric"])
+            .build();
+
+        let val_lbl_clone = val_label.clone();
+        scale.connect_value_changed(move |s| {
+            val_lbl_clone.set_label(&format!("{:.0}%", s.value() * 100.0));
+        });
+
+        container.append(&icon);
+        container.append(&title_label);
+        container.append(&scale);
+        container.append(&val_label);
+
+        (container, scale)
+    }
+
     pub fn new(
         initial_vol_local: f64,
         initial_vol_mic: f64,
@@ -118,67 +162,10 @@ impl ControlsBar {
             .homogeneous(true)
             .build();
 
-        let local_box = gtk::Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .spacing(10)
-            .build();
-
-        let local_icon = gtk::Image::builder()
-            .icon_name("audio-headphones-symbolic")
-            .pixel_size(16)
-            .build();
-
-        let local_title = gtk::Label::builder()
-            .label("Headphones:")
-            .css_classes(["caption"])
-            .build();
-
-        let vol_local_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 10.0, 0.1);
-        vol_local_scale.set_value(initial_vol_local);
-        vol_local_scale.set_hexpand(true);
-        vol_local_scale.set_draw_value(false);
-
-        let vol_local_val_label = gtk::Label::builder()
-            .label(&format!("{:.0}%", initial_vol_local * 100.0))
-            .width_chars(6)
-            .css_classes(["caption", "numeric"])
-            .build();
-
-        local_box.append(&local_icon);
-        local_box.append(&local_title);
-        local_box.append(&vol_local_scale);
-        local_box.append(&vol_local_val_label);
-
-        let mic_box = gtk::Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .spacing(10)
-            .build();
-
-        let mic_icon = gtk::Image::builder()
-            .icon_name("audio-volume-high-symbolic")
-            .pixel_size(16)
-            .build();
-
-        let mic_title = gtk::Label::builder()
-            .label("Virtual Mic:")
-            .css_classes(["caption"])
-            .build();
-
-        let vol_mic_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 10.0, 0.1);
-        vol_mic_scale.set_value(initial_vol_mic);
-        vol_mic_scale.set_hexpand(true);
-        vol_mic_scale.set_draw_value(false);
-
-        let vol_mic_val_label = gtk::Label::builder()
-            .label(&format!("{:.0}%", initial_vol_mic * 100.0))
-            .width_chars(6)
-            .css_classes(["caption", "numeric"])
-            .build();
-
-        mic_box.append(&mic_icon);
-        mic_box.append(&mic_title);
-        mic_box.append(&vol_mic_scale);
-        mic_box.append(&vol_mic_val_label);
+        let (local_box, vol_local_scale) =
+            Self::create_volume_channel("audio-headphones-symbolic", "Headphones:", initial_vol_local);
+        let (mic_box, vol_mic_scale) =
+            Self::create_volume_channel("audio-volume-high-symbolic", "Virtual Mic:", initial_vol_mic);
 
         row2.append(&local_box);
         row2.append(&mic_box);
@@ -211,16 +198,6 @@ impl ControlsBar {
         container.append(&row1);
         container.append(&row2);
         container.append(&progress_box);
-
-        let local_lbl = vol_local_val_label.clone();
-        vol_local_scale.connect_value_changed(move |scale| {
-            local_lbl.set_label(&format!("{:.0}%", scale.value() * 100.0));
-        });
-
-        let mic_lbl = vol_mic_val_label.clone();
-        vol_mic_scale.connect_value_changed(move |scale| {
-            mic_lbl.set_label(&format!("{:.0}%", scale.value() * 100.0));
-        });
 
         Self {
             container,
@@ -290,21 +267,20 @@ impl ControlsBar {
             .map(|m| m.node_name.clone())
     }
 
+    #[inline]
+    fn format_timestamp(secs: f64) -> String {
+        let s = secs.round() as u64;
+        format!("{:02}:{:02}", s / 60, s % 60)
+    }
+
     pub fn set_playback_progress(&self, current_secs: f64, total_secs: f64) {
-        let clamped_total = if total_secs > 0.1 { total_secs } else { 1.0 };
-        let clamped_curr = current_secs.clamp(0.0, clamped_total);
-        self.progress_scale.set_range(0.0, clamped_total);
-        self.progress_scale.set_value(clamped_curr);
+        let total = if total_secs > 0.1 { total_secs } else { 1.0 };
+        let current = current_secs.clamp(0.0, total);
 
-        let cur_m = (clamped_curr.round() as u64) / 60;
-        let cur_s = (clamped_curr.round() as u64) % 60;
-        self.time_current_label
-            .set_label(&format!("{:02}:{:02}", cur_m, cur_s));
-
-        let tot_m = (clamped_total.round() as u64) / 60;
-        let tot_s = (clamped_total.round() as u64) % 60;
-        self.time_total_label
-            .set_label(&format!("{:02}:{:02}", tot_m, tot_s));
+        self.progress_scale.set_range(0.0, total);
+        self.progress_scale.set_value(current);
+        self.time_current_label.set_label(&Self::format_timestamp(current));
+        self.time_total_label.set_label(&Self::format_timestamp(total));
     }
 
     pub fn reset_progress(&self) {

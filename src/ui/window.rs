@@ -8,13 +8,10 @@ use gtk4 as gtk;
 use gtk4::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::Rc;
-use std::time::Duration;
-
-use std::cell::Cell;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub struct MainWindow {
     window: adw::ApplicationWindow,
@@ -421,14 +418,19 @@ impl MainWindow {
             let vol_mic = self.controls.mic_volume();
             let clamped = target_secs.clamp(0.0, item.duration_secs);
 
-            if let Ok(_) = self
+            match self
                 .audio_engine
                 .play_sound(&item.path, vol_local, vol_mic, clamped)
             {
-                self.playback_offset.set(clamped);
-                self.playback_start.set(Some(Instant::now()));
-                self.controls
-                    .set_playback_progress(clamped, item.duration_secs);
+                Ok(_) => {
+                    self.playback_offset.set(clamped);
+                    self.playback_start.set(Some(Instant::now()));
+                    self.controls
+                        .set_playback_progress(clamped, item.duration_secs);
+                }
+                Err(e) => {
+                    eprintln!("Failed to seek: {}", e);
+                }
             }
             self.is_user_seeking.set(false);
         }

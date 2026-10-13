@@ -15,24 +15,21 @@ pub struct SoundItem {
 
 impl SoundItem {
     pub fn probe_duration(path: &Path) -> f64 {
-        let output = match std::process::Command::new("ffprobe")
-            .args([
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-            ])
-            .arg(path)
-            .output()
-        {
-            Ok(out) => out,
-            Err(_) => return 0.0,
-        };
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        stdout.trim().parse::<f64>().unwrap_or(0.0)
+        let mut cmd = std::process::Command::new("ffprobe");
+        cmd.env_remove("LD_LIBRARY_PATH");
+        cmd.args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+        ])
+        .arg(path)
+        .output()
+        .ok()
+        .and_then(|out| String::from_utf8_lossy(&out.stdout).trim().parse::<f64>().ok())
+        .unwrap_or(0.0)
     }
 
     pub fn format_duration(secs: f64) -> String {
@@ -66,7 +63,7 @@ impl SoundItem {
         let duration_secs = Self::probe_duration(path);
         let formatted_duration = Self::format_duration(duration_secs);
 
-        let id = path.to_string_lossy().to_string();
+        let id = path.to_string_lossy().into_owned();
 
         Some(Self {
             id,
@@ -91,27 +88,20 @@ impl SoundLibrary {
     }
 
     pub fn scan_directory(&mut self, directory: &Path) -> Result<usize> {
-        if !directory.exists() || !directory.is_dir() {
+        if !directory.is_dir() {
             return Err(AppError::NotFound(format!(
                 "Directory does not exist: {}",
                 directory.display()
             )));
         }
 
-        let mut discovered = Vec::new();
-
-        for entry in WalkDir::new(directory)
+        let mut discovered: Vec<_> = WalkDir::new(directory)
             .follow_links(true)
             .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            let path = entry.path();
-            if path.is_file() {
-                if let Some(item) = SoundItem::from_path(path) {
-                    discovered.push(item);
-                }
-            }
-        }
+            .filter_map(std::result::Result::ok)
+            .filter(|e| e.file_type().is_file())
+            .filter_map(|e| SoundItem::from_path(e.path()))
+            .collect();
 
         discovered.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
         let count = discovered.len();
@@ -125,11 +115,12 @@ impl SoundLibrary {
     }
 
     pub fn filter(&self, query: &str) -> Vec<SoundItem> {
-        if query.trim().is_empty() {
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
             return self.items.clone();
         }
 
-        let query_lower = query.to_lowercase();
+        let query_lower = trimmed.to_lowercase();
         self.items
             .iter()
             .filter(|item| item.title.to_lowercase().contains(&query_lower))

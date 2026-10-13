@@ -8,6 +8,13 @@ use std::time::Duration;
 pub const SINK_NODE_NAME: &str = "efedrin_soundpad";
 pub const SOURCE_NODE_NAME: &str = "efedrin_mic";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MicrophoneSource {
+    pub node_name: String,
+    pub description: String,
+    pub ports: Vec<String>,
+}
+
 pub struct PipeWireManager {
     loopback_child: Option<Child>,
     mic_passthrough_enabled: Arc<AtomicBool>,
@@ -22,35 +29,24 @@ impl PipeWireManager {
     }
 
     pub fn check_prerequisites() -> Result<()> {
-        if which::which("pw-loopback").is_err() {
-            return Err(AppError::PipeWire(
-                "Binary 'pw-loopback' not found in PATH. Make sure PipeWire is installed.".into(),
-            ));
-        }
-        if which::which("pw-link").is_err() {
-            return Err(AppError::PipeWire(
-                "Binary 'pw-link' not found in PATH. Make sure PipeWire is installed.".into(),
-            ));
-        }
-        if which::which("pw-play").is_err() {
-            return Err(AppError::PipeWire(
-                "Binary 'pw-play' not found in PATH. Make sure PipeWire is installed.".into(),
-            ));
+        for bin in &["pw-loopback", "pw-link", "pw-play"] {
+            if which::which(bin).is_err() {
+                return Err(AppError::PipeWire(format!(
+                    "Binary '{}' not found in PATH. Make sure PipeWire is installed.",
+                    bin
+                )));
+            }
         }
         Ok(())
     }
 
     pub fn is_running(&mut self) -> bool {
-        if let Some(child) = &mut self.loopback_child {
-            match child.try_wait() {
-                Ok(None) => true,
-                _ => {
-                    self.loopback_child = None;
-                    false
-                }
+        match self.loopback_child.as_mut().map(|c| c.try_wait()) {
+            Some(Ok(None)) => true,
+            _ => {
+                self.loopback_child = None;
+                false
             }
-        } else {
-            false
         }
     }
 
@@ -68,11 +64,11 @@ impl PipeWireManager {
         thread::sleep(Duration::from_millis(50));
 
         let capture_props = format!(
-            "media.class=Audio/Sink node.name={} node.description=\"Efedrin Soundpad Sink\"",
+            "media.class=Audio/Sink node.name={} node.description=\"Efedrin Soundpad Sink\" resample.disable=false",
             SINK_NODE_NAME
         );
         let playback_props = format!(
-            "media.class=Audio/Source node.name={} node.description=\"Efedrin Virtual Microphone\"",
+            "media.class=Audio/Source node.name={} node.description=\"Efedrin Virtual Microphone\" resample.disable=false",
             SOURCE_NODE_NAME
         );
 
@@ -87,12 +83,7 @@ impl PipeWireManager {
 
         self.loopback_child = Some(child);
 
-        thread::sleep(Duration::from_millis(200));
-
-        let _ = Command::new("wpctl")
-            .args(["set-volume", "@DEFAULT_AUDIO_SOURCE@", "1.0"])
-            .output();
-
+        thread::sleep(Duration::from_millis(100));
         Ok(())
     }
 
@@ -106,20 +97,40 @@ impl PipeWireManager {
             .output();
         self.mic_passthrough_enabled.store(false, Ordering::SeqCst);
     }
-}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MicrophoneSource {
-    pub node_name: String,
-    pub description: String,
-    pub ports: Vec<String>,
-}
+    fn fetch_node_descriptions() -> std::collections::HashMap<String, String> {
+        let mut descriptions = std::collections::HashMap::new();
+        let Ok(out) = Command::new("pw-cli").args(["list-objects", "Node"]).output() else {
+            return descriptions;
+        };
 
-impl PipeWireManager {
+        let dump = String::from_utf8_lossy(&out.stdout);
+        let mut curr_name = None;
+        let mut curr_desc = None;
+
+        for line in dump.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("id ") && trimmed.contains("type PipeWire:Interface:Node") {
+                if let (Some(n), Some(d)) = (curr_name.take(), curr_desc.take()) {
+                    descriptions.insert(n, d);
+                }
+            } else if let Some(val) = trimmed.strip_prefix("node.name = ") {
+                curr_name = Some(val.trim_matches('"').to_string());
+            } else if let Some(val) = trimmed.strip_prefix("node.description = ") {
+                curr_desc = Some(val.trim_matches('"').to_string());
+            }
+        }
+
+        if let (Some(n), Some(d)) = (curr_name, curr_desc) {
+            descriptions.insert(n, d);
+        }
+
+        descriptions
+    }
+
     pub fn list_microphones() -> Vec<MicrophoneSource> {
-        let output = match Command::new("pw-link").arg("-o").output() {
-            Ok(out) => out,
-            Err(_) => return Vec::new(),
+        let Ok(output) = Command::new("pw-link").arg("-o").output() else {
+            return Vec::new();
         };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -131,7 +142,7 @@ impl PipeWireManager {
             if trimmed.is_empty() || trimmed.contains("efedrin") {
                 continue;
             }
-            if let Some((node, _port)) = trimmed.split_once(':') {
+            if let Some((node, _)) = trimmed.split_once(':') {
                 if node.starts_with("alsa_input") || node.starts_with("easyeffects_source") {
                     node_to_ports
                         .entry(node.to_string())
@@ -141,85 +152,57 @@ impl PipeWireManager {
             }
         }
 
-        let desc_output = Command::new("pw-cli")
-            .args(["list-objects", "Node"])
-            .output()
-            .ok();
-        let mut descriptions = std::collections::HashMap::new();
-
-        if let Some(out) = desc_output {
-            let dump = String::from_utf8_lossy(&out.stdout);
-            let mut curr_name = None;
-            let mut curr_desc = None;
-
-            for line in dump.lines() {
-                let trimmed = line.trim();
-                if trimmed.starts_with("id ") && trimmed.contains("type PipeWire:Interface:Node") {
-                    if let (Some(n), Some(d)) = (curr_name.take(), curr_desc.take()) {
-                        descriptions.insert(n, d);
-                    }
-                } else if trimmed.starts_with("node.name = ") {
-                    curr_name = Some(
-                        trimmed
-                            .trim_start_matches("node.name = ")
-                            .trim_matches('"')
-                            .to_string(),
-                    );
-                } else if trimmed.starts_with("node.description = ") {
-                    curr_desc = Some(
-                        trimmed
-                            .trim_start_matches("node.description = ")
-                            .trim_matches('"')
-                            .to_string(),
-                    );
+        let descriptions = Self::fetch_node_descriptions();
+        let mut result: Vec<_> = node_to_ports
+            .into_iter()
+            .map(|(node_name, ports)| {
+                let description = descriptions
+                    .get(&node_name)
+                    .cloned()
+                    .unwrap_or_else(|| node_name.clone());
+                MicrophoneSource {
+                    node_name,
+                    description,
+                    ports,
                 }
-            }
-            if let (Some(n), Some(d)) = (curr_name.take(), curr_desc.take()) {
-                descriptions.insert(n, d);
-            }
-        }
-
-        let mut result = Vec::new();
-        for (node_name, ports) in node_to_ports {
-            let description = descriptions
-                .get(&node_name)
-                .cloned()
-                .unwrap_or_else(|| node_name.clone());
-            result.push(MicrophoneSource {
-                node_name,
-                description,
-                ports,
-            });
-        }
+            })
+            .collect();
 
         result.sort_by(|a, b| a.description.cmp(&b.description));
         result
     }
 
     fn disconnect_soundpad_mic_inputs() {
-        if let Ok(output) = Command::new("pw-link").arg("-l").output() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let mut current_port: Option<String> = None;
+        let Ok(output) = Command::new("pw-link").arg("-l").output() else {
+            return;
+        };
 
-            for line in stdout.lines() {
-                if !line.starts_with("  |") {
-                    let trimmed = line.trim();
-                    if !trimmed.is_empty() {
-                        current_port = Some(trimmed.to_string());
-                    }
-                } else if let Some(dest) = &current_port {
-                    if dest.starts_with(&format!("{}:playback_", SINK_NODE_NAME)) {
-                        let trimmed = line.trim();
-                        if let Some(src) = trimmed.strip_prefix("|<- ") {
-                            let src = src.trim();
-                            if !src.starts_with("efedrin_mic_stream:") {
-                                let _ = Command::new("pw-link").args(["-d", src, dest]).output();
-                            }
-                        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut current_dest = None;
+        let target_prefix = format!("{}:playback_", SINK_NODE_NAME);
+
+        for line in stdout.lines() {
+            if !line.starts_with("  |") {
+                let trimmed = line.trim();
+                current_dest = if trimmed.starts_with(&target_prefix) {
+                    Some(trimmed.to_string())
+                } else {
+                    None
+                };
+            } else if let Some(dest) = &current_dest {
+                if let Some(src) = line.trim().strip_prefix("|<- ") {
+                    let src = src.trim();
+                    if !src.starts_with("efedrin_mic_stream:") {
+                        let _ = Command::new("pw-link").args(["-d", src, dest]).output();
                     }
                 }
             }
         }
+    }
+
+    #[inline]
+    fn link_ports(src: &str, dest: &str) {
+        let _ = Command::new("pw-link").args([src, dest]).output();
     }
 
     pub fn set_mic_passthrough(&self, enable: bool, selected_mic_node: Option<&str>) -> Result<()> {
@@ -227,49 +210,35 @@ impl PipeWireManager {
 
         if enable {
             let all_mics = Self::list_microphones();
-            let active_mic = if let Some(node) = selected_mic_node {
-                all_mics.iter().find(|m| m.node_name == node)
-            } else {
-                all_mics.first()
-            };
-
-            let target_in_left = format!("{}:playback_FL", SINK_NODE_NAME);
-            let target_in_right = format!("{}:playback_FR", SINK_NODE_NAME);
+            let active_mic = selected_mic_node
+                .and_then(|node| all_mics.iter().find(|m| m.node_name == node))
+                .or_else(|| all_mics.first());
 
             if let Some(mic) = active_mic {
+                let in_left = format!("{}:playback_FL", SINK_NODE_NAME);
+                let in_right = format!("{}:playback_FR", SINK_NODE_NAME);
+
                 if mic.ports.len() == 1 {
-                    let port = &mic.ports[0];
-                    let _ = Command::new("pw-link")
-                        .args([port, &target_in_left])
-                        .output();
-                    let _ = Command::new("pw-link")
-                        .args([port, &target_in_right])
-                        .output();
+                    Self::link_ports(&mic.ports[0], &in_left);
+                    Self::link_ports(&mic.ports[0], &in_right);
                 } else {
                     for port in &mic.ports {
-                        if port.ends_with("_FL")
+                        let is_left = port.ends_with("_FL")
                             || port.ends_with("AUX0")
                             || port.ends_with("_0")
-                            || port.ends_with(":capture_1")
-                        {
-                            let _ = Command::new("pw-link")
-                                .args([port, &target_in_left])
-                                .output();
-                        } else if port.ends_with("_FR")
+                            || port.ends_with(":capture_1");
+                        let is_right = port.ends_with("_FR")
                             || port.ends_with("AUX1")
                             || port.ends_with("_1")
-                            || port.ends_with(":capture_2")
-                        {
-                            let _ = Command::new("pw-link")
-                                .args([port, &target_in_right])
-                                .output();
+                            || port.ends_with(":capture_2");
+
+                        if is_left {
+                            Self::link_ports(port, &in_left);
+                        } else if is_right {
+                            Self::link_ports(port, &in_right);
                         } else {
-                            let _ = Command::new("pw-link")
-                                .args([port, &target_in_left])
-                                .output();
-                            let _ = Command::new("pw-link")
-                                .args([port, &target_in_right])
-                                .output();
+                            Self::link_ports(port, &in_left);
+                            Self::link_ports(port, &in_right);
                         }
                     }
                 }

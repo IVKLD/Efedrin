@@ -75,35 +75,34 @@ impl SoundGrid {
         while let Some(child) = self.flow_box.first_child() {
             self.flow_box.remove(&child);
         }
-        self.cards.borrow_mut().clear();
 
-        if sounds.is_empty() {
-            self.status_page.set_visible(true);
-            self.scrolled_window.set_visible(false);
-        } else {
-            self.status_page.set_visible(false);
-            self.scrolled_window.set_visible(true);
+        let is_empty = sounds.is_empty();
+        self.status_page.set_visible(is_empty);
+        self.scrolled_window.set_visible(!is_empty);
 
-            let mut new_cards = Vec::with_capacity(sounds.len());
-            for item in sounds {
-                let on_play_clone = on_play.clone();
-                let card = SoundCardWidget::create(item, move |clicked_item| {
-                    on_play_clone(clicked_item);
-                });
-                if current_active_id.map_or(false, |id| id == item.id) {
-                    card.set_playing(true);
-                }
-                self.flow_box.insert(&card.button, -1);
-                new_cards.push(card);
+        if is_empty {
+            self.cards.borrow_mut().clear();
+            return;
+        }
+
+        let mut cards = self.cards.borrow_mut();
+        cards.clear();
+        cards.reserve(sounds.len());
+
+        for item in sounds {
+            let on_play_cb = on_play.clone();
+            let card = SoundCardWidget::create(item, move |clicked| on_play_cb(clicked));
+            if current_active_id == Some(&item.id) {
+                card.set_playing(true);
             }
-            *self.cards.borrow_mut() = new_cards;
+            self.flow_box.insert(&card.button, -1);
+            cards.push(card);
         }
     }
 
     pub fn set_active_sound(&self, active_id: Option<&str>) {
         for card in self.cards.borrow().iter() {
-            let is_current = active_id.map_or(false, |id| id == card.item.id);
-            card.set_playing(is_current);
+            card.set_playing(active_id == Some(&card.item.id));
         }
     }
 }
