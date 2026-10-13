@@ -1,5 +1,23 @@
-/target
+# Rust / Cargo
+/target/
+**/*.rs.bk
+Cargo.lock.backup
+
+# Nix / Direnv
 /result
-*.log
+/result-*
+.direnv/
+
+# System & IDE
 .DS_Store
-.direnv
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Logs & Temp files
+*.log
+/tmp/

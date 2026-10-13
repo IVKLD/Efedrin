@@ -55,9 +55,20 @@
             fi
           '';
 
+          postFixup = ''
+            wrapProgram $out/bin/efedrin \
+              --prefix PATH : ${pkgs.lib.makeBinPath [
+                pkgs.ffmpeg
+                pkgs.pipewire
+                pkgs.wireplumber
+                pkgs.which
+                pkgs.xdg-utils
+              ]}
+          '';
+
           meta = with pkgs.lib; {
             description = "PipeWire Soundpad for Linux with dual-routing and virtual microphone support";
-            homepage = "https://github.com/igni/efedrin";
+            homepage = "https://github.com/IVKLD/Efedrin";
             license = licenses.mit;
             platforms = platforms.linux;
             mainProgram = "efedrin";
@@ -71,5 +82,26 @@
           '';
         };
       }
-    );
+    ) // {
+      overlays.default = final: prev: {
+        efedrin = self.packages.${prev.stdenv.hostPlatform.system}.default;
+      };
+
+      nixosModules.default = { config, lib, pkgs, ... }:
+        let
+          cfg = config.programs.efedrin;
+        in
+        {
+          options.programs.efedrin = {
+            enable = lib.mkEnableOption "Efedrin PipeWire Soundpad";
+            package = lib.mkPackageOption self.packages.${pkgs.stdenv.hostPlatform.system} "default" { };
+          };
+
+          config = lib.mkIf cfg.enable {
+            environment.systemPackages = [ cfg.package ];
+            security.polkit.enable = lib.mkDefault true;
+            services.pipewire.enable = lib.mkDefault true;
+          };
+        };
+    };
 }
