@@ -40,6 +40,7 @@ impl MainWindow {
         let is_user_seeking = Rc::new(Cell::new(false));
 
         let cfg = config.borrow();
+        let initial_vol_master = cfg.volume_master;
         let initial_vol_local = cfg.volume_local;
         let initial_vol_mic = cfg.volume_mic;
         let initial_passthrough = cfg.mic_passthrough;
@@ -63,6 +64,7 @@ impl MainWindow {
 
         let mics = audio_engine.list_microphones();
         let controls = Rc::new(ControlsBar::new(
+            initial_vol_master,
             initial_vol_local,
             initial_vol_mic,
             initial_passthrough,
@@ -222,26 +224,45 @@ impl MainWindow {
                 this_search.filter_sounds(&query);
             });
 
+        let cfg_master = this.config.clone();
+        let engine_vol_master = this.audio_engine.clone();
+        let controls_master = this.controls.clone();
+        this.controls
+            .vol_master_scale()
+            .connect_value_changed(move |scale| {
+                let master = scale.value();
+                cfg_master.borrow_mut().volume_master = master;
+                let _ = cfg_master.borrow().save();
+                let local_eff = controls_master.local_volume() * master;
+                let mic_eff = controls_master.mic_volume() * master;
+                engine_vol_master.set_local_volume(local_eff);
+                engine_vol_master.set_mic_volume(mic_eff);
+            });
+
         let cfg_vol = this.config.clone();
         let engine_vol_local = this.audio_engine.clone();
+        let controls_vol = this.controls.clone();
         this.controls
             .vol_local_scale()
             .connect_value_changed(move |scale| {
                 let val = scale.value();
                 cfg_vol.borrow_mut().volume_local = val;
                 let _ = cfg_vol.borrow().save();
-                engine_vol_local.set_local_volume(val);
+                let master = controls_vol.master_volume();
+                engine_vol_local.set_local_volume(val * master);
             });
 
         let cfg_mic = this.config.clone();
         let engine_vol_mic = this.audio_engine.clone();
+        let controls_mic = this.controls.clone();
         this.controls
             .vol_mic_scale()
             .connect_value_changed(move |scale| {
                 let val = scale.value();
                 cfg_mic.borrow_mut().volume_mic = val;
                 let _ = cfg_mic.borrow().save();
-                engine_vol_mic.set_mic_volume(val);
+                let master = controls_mic.master_volume();
+                engine_vol_mic.set_mic_volume(val * master);
             });
 
         let engine_pt = this.audio_engine.clone();
@@ -376,8 +397,9 @@ impl MainWindow {
             return;
         }
 
-        let vol_local = self.controls.local_volume();
-        let vol_mic = self.controls.mic_volume();
+        let master = self.controls.master_volume();
+        let vol_local = self.controls.local_volume() * master;
+        let vol_mic = self.controls.mic_volume() * master;
 
         match self
             .audio_engine
@@ -391,10 +413,11 @@ impl MainWindow {
                 self.controls.set_playback_progress(0.0, item.duration_secs);
                 self.sound_grid.set_active_sound(Some(&item.id));
                 self.status_label.set_label(&format!(
-                    "Playing: {} (Local: {:.0}%, Mic: {:.0}%)",
+                    "Playing: {} (Sound: {:.0}%, Local: {:.0}%, Mic: {:.0}%)",
                     item.title,
-                    vol_local * 100.0,
-                    vol_mic * 100.0
+                    master * 100.0,
+                    self.controls.local_volume() * 100.0,
+                    self.controls.mic_volume() * 100.0
                 ));
             }
             Err(e) => {
@@ -414,8 +437,9 @@ impl MainWindow {
         let current_item = self.current_playing_item.borrow().clone();
         if let Some(item) = current_item {
             self.is_user_seeking.set(true);
-            let vol_local = self.controls.local_volume();
-            let vol_mic = self.controls.mic_volume();
+            let master = self.controls.master_volume();
+            let vol_local = self.controls.local_volume() * master;
+            let vol_mic = self.controls.mic_volume() * master;
             let clamped = target_secs.clamp(0.0, item.duration_secs);
 
             match self

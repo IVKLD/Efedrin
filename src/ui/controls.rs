@@ -7,6 +7,7 @@ pub struct ControlsBar {
     folder_button: gtk::Button,
     folder_label: gtk::Label,
     search_entry: gtk::SearchEntry,
+    vol_master_scale: gtk::Scale,
     vol_local_scale: gtk::Scale,
     vol_mic_scale: gtk::Scale,
     passthrough_switch: gtk::Switch,
@@ -63,6 +64,7 @@ impl ControlsBar {
     }
 
     pub fn new(
+        initial_vol_master: f64,
         initial_vol_local: f64,
         initial_vol_mic: f64,
         initial_passthrough: bool,
@@ -158,15 +160,18 @@ impl ControlsBar {
 
         let row2 = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
-            .spacing(24)
+            .spacing(18)
             .homogeneous(true)
             .build();
 
+        let (master_box, vol_master_scale) =
+            Self::create_volume_channel("media-playback-start-symbolic", "Sound Vol:", initial_vol_master);
         let (local_box, vol_local_scale) =
             Self::create_volume_channel("audio-headphones-symbolic", "Headphones:", initial_vol_local);
         let (mic_box, vol_mic_scale) =
             Self::create_volume_channel("audio-volume-high-symbolic", "Virtual Mic:", initial_vol_mic);
 
+        row2.append(&master_box);
         row2.append(&local_box);
         row2.append(&mic_box);
 
@@ -204,6 +209,7 @@ impl ControlsBar {
             folder_button,
             folder_label,
             search_entry,
+            vol_master_scale,
             vol_local_scale,
             vol_mic_scale,
             passthrough_switch,
@@ -231,6 +237,10 @@ impl ControlsBar {
         &self.search_entry
     }
 
+    pub fn vol_master_scale(&self) -> &gtk::Scale {
+        &self.vol_master_scale
+    }
+
     pub fn vol_local_scale(&self) -> &gtk::Scale {
         &self.vol_local_scale
     }
@@ -249,6 +259,10 @@ impl ControlsBar {
 
     pub fn progress_scale(&self) -> &gtk::Scale {
         &self.progress_scale
+    }
+
+    pub fn master_volume(&self) -> f64 {
+        self.vol_master_scale.value()
     }
 
     pub fn local_volume(&self) -> f64 {
