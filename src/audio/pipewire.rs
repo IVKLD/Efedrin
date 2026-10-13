@@ -247,11 +247,26 @@ impl PipeWireManager {
                         .output();
                 } else {
                     for port in &mic.ports {
-                        if port.ends_with("_FL") || port.ends_with("AUX0") || port.ends_with("1") {
+                        if port.ends_with("_FL")
+                            || port.ends_with("AUX0")
+                            || port.ends_with("_0")
+                            || port.ends_with(":capture_1")
+                        {
                             let _ = Command::new("pw-link")
                                 .args([port, &target_in_left])
                                 .output();
+                        } else if port.ends_with("_FR")
+                            || port.ends_with("AUX1")
+                            || port.ends_with("_1")
+                            || port.ends_with(":capture_2")
+                        {
+                            let _ = Command::new("pw-link")
+                                .args([port, &target_in_right])
+                                .output();
                         } else {
+                            let _ = Command::new("pw-link")
+                                .args([port, &target_in_left])
+                                .output();
                             let _ = Command::new("pw-link")
                                 .args([port, &target_in_right])
                                 .output();

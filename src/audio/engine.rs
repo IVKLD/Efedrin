@@ -65,44 +65,54 @@ impl AudioEngine {
 
         let mut spawned = Vec::new();
 
+        let effective_path = if start_seconds > 0.1 {
+            let ext = sound_path
+                .extension()
+                .and_then(|s| s.to_str())
+                .unwrap_or("mp3");
+            let temp_seek_path =
+                std::env::temp_dir().join(format!("efedrin_seek_{}.{}", std::process::id(), ext));
+            let status = Command::new("ffmpeg")
+                .args([
+                    "-ss",
+                    &format!("{:.3}", start_seconds),
+                    "-i",
+                    path_str,
+                    "-c:a",
+                    "copy",
+                    "-y",
+                    temp_seek_path.to_str().unwrap(),
+                ])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+
+            if status.is_ok() && temp_seek_path.exists() {
+                temp_seek_path
+            } else {
+                sound_path.to_path_buf()
+            }
+        } else {
+            sound_path.to_path_buf()
+        };
+
+        let play_target_str = effective_path
+            .to_str()
+            .ok_or_else(|| AppError::Audio("Invalid path string".into()))?;
+
         if volume_local > 0.001 {
             let clamped_vol_local = volume_local.clamp(0.0, 5.0);
             let mut cmd = Command::new("pw-play");
             cmd.arg(format!("--properties=node.name=\"{}\"", LOCAL_STREAM_NAME))
-                .arg(format!("--volume={:.3}", clamped_vol_local));
+                .arg(format!("--volume={:.3}", clamped_vol_local))
+                .arg(play_target_str)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
 
-            let child_local = if start_seconds > 0.1 {
-                let ffmpeg = Command::new("ffmpeg")
-                    .args([
-                        "-ss",
-                        &format!("{:.3}", start_seconds),
-                        "-i",
-                        path_str,
-                        "-f",
-                        "wav",
-                        "-",
-                    ])
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .map_err(|e| AppError::Audio(format!("Failed to spawn ffmpeg: {}", e)))?;
-
-                let child = cmd
-                    .arg("-")
-                    .stdin(ffmpeg.stdout.unwrap())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .map_err(|e| AppError::Audio(format!("Failed to play local stream: {}", e)))?;
-                child
-            } else {
-                cmd.arg(path_str)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .map_err(|e| AppError::Audio(format!("Failed to play local stream: {}", e)))?
-            };
+            let child_local = cmd
+                .spawn()
+                .map_err(|e| AppError::Audio(format!("Failed to play local stream: {}", e)))?;
             spawned.push(child_local);
         }
 
@@ -111,44 +121,15 @@ impl AudioEngine {
             let mut cmd = Command::new("pw-play");
             cmd.arg(format!("--target={}", SINK_NODE_NAME))
                 .arg(format!("--properties=node.name=\"{}\"", MIC_STREAM_NAME))
-                .arg(format!("--volume={:.3}", clamped_vol_mic));
+                .arg(format!("--volume={:.3}", clamped_vol_mic))
+                .arg(play_target_str)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
 
-            let child_mic = if start_seconds > 0.1 {
-                let ffmpeg = Command::new("ffmpeg")
-                    .args([
-                        "-ss",
-                        &format!("{:.3}", start_seconds),
-                        "-i",
-                        path_str,
-                        "-f",
-                        "wav",
-                        "-",
-                    ])
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .map_err(|e| AppError::Audio(format!("Failed to spawn ffmpeg: {}", e)))?;
-
-                let child = cmd
-                    .arg("-")
-                    .stdin(ffmpeg.stdout.unwrap())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .map_err(|e| {
-                        AppError::Audio(format!("Failed to play virtual mic stream: {}", e))
-                    })?;
-                child
-            } else {
-                cmd.arg(path_str)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .map_err(|e| {
-                        AppError::Audio(format!("Failed to play virtual mic stream: {}", e))
-                    })?
-            };
+            let child_mic = cmd.spawn().map_err(|e| {
+                AppError::Audio(format!("Failed to play virtual mic stream: {}", e))
+            })?;
             spawned.push(child_mic);
         }
 
