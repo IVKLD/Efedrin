@@ -101,9 +101,13 @@ impl AudioEngine {
             .ok_or_else(|| AppError::Audio("Invalid path string".into()))?;
 
         if volume_local > 0.001 {
-            let clamped_vol_local = volume_local.clamp(0.0, 5.0);
+            let clamped_vol_local = volume_local.clamp(0.0, 10.0);
             let mut cmd = Command::new("pw-play");
-            cmd.arg(format!("--properties=node.name=\"{}\"", LOCAL_STREAM_NAME))
+            cmd.arg("--rate=48000")
+                .arg(format!(
+                    "--properties=application.name=\"efedrin_soundpad\" node.name=\"{}\"",
+                    LOCAL_STREAM_NAME
+                ))
                 .arg(format!("--volume={:.3}", clamped_vol_local))
                 .arg(play_target_str)
                 .stdin(Stdio::null())
@@ -117,10 +121,14 @@ impl AudioEngine {
         }
 
         if volume_mic > 0.001 {
-            let clamped_vol_mic = volume_mic.clamp(0.0, 5.0);
+            let clamped_vol_mic = volume_mic.clamp(0.0, 10.0);
             let mut cmd = Command::new("pw-play");
-            cmd.arg(format!("--target={}", SINK_NODE_NAME))
-                .arg(format!("--properties=node.name=\"{}\"", MIC_STREAM_NAME))
+            cmd.arg("--rate=48000")
+                .arg(format!("--target={}", SINK_NODE_NAME))
+                .arg(format!(
+                    "--properties=application.name=\"efedrin_soundpad\" node.name=\"{}\"",
+                    MIC_STREAM_NAME
+                ))
                 .arg(format!("--volume={:.3}", clamped_vol_mic))
                 .arg(play_target_str)
                 .stdin(Stdio::null())
@@ -187,10 +195,14 @@ impl AudioEngine {
     }
 
     fn update_stream_volume(stream_name: &str, volume: f64) {
-        let clamped = volume.clamp(0.0, 5.0);
+        let clamped = volume.clamp(0.0, 10.0);
+        let param_json = format!("{{ volume: {:.3} }}", clamped);
+        let _ = Command::new("pw-cli")
+            .args(["s", stream_name, "Props", &param_json])
+            .output();
+
         let ids = Self::find_node_ids_by_name(stream_name);
         for id in ids {
-            let param_json = format!("{{ volume: {:.3} }}", clamped);
             let _ = Command::new("pw-cli")
                 .args(["s", &id, "Props", &param_json])
                 .output();

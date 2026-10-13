@@ -133,14 +133,14 @@ impl ControlsBar {
             .css_classes(["caption"])
             .build();
 
-        let vol_local_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 3.0, 0.05);
+        let vol_local_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 10.0, 0.1);
         vol_local_scale.set_value(initial_vol_local);
         vol_local_scale.set_hexpand(true);
         vol_local_scale.set_draw_value(false);
 
         let vol_local_val_label = gtk::Label::builder()
             .label(&format!("{:.0}%", initial_vol_local * 100.0))
-            .width_chars(5)
+            .width_chars(6)
             .css_classes(["caption", "numeric"])
             .build();
 
@@ -164,14 +164,14 @@ impl ControlsBar {
             .css_classes(["caption"])
             .build();
 
-        let vol_mic_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 3.0, 0.05);
+        let vol_mic_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 10.0, 0.1);
         vol_mic_scale.set_value(initial_vol_mic);
         vol_mic_scale.set_hexpand(true);
         vol_mic_scale.set_draw_value(false);
 
         let vol_mic_val_label = gtk::Label::builder()
             .label(&format!("{:.0}%", initial_vol_mic * 100.0))
-            .width_chars(5)
+            .width_chars(6)
             .css_classes(["caption", "numeric"])
             .build();
 

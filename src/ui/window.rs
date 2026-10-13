@@ -137,24 +137,34 @@ impl MainWindow {
             let offset_poll = main_window.playback_offset.clone();
             let seeking_poll = main_window.is_user_seeking.clone();
 
+            let mut stopped_ticks = 0u8;
             glib::timeout_add_local(Duration::from_millis(100), move || {
                 if current_id_poll.borrow().is_some() {
                     if !engine_poll.is_playing() {
-                        *current_id_poll.borrow_mut() = None;
-                        *current_item_poll.borrow_mut() = None;
-                        start_poll.set(None);
-                        offset_poll.set(0.0);
-                        grid_poll.set_active_sound(None);
-                        status_lbl_poll.set_label("Ready");
-                        controls_poll.reset_progress();
-                    } else if !seeking_poll.get() {
-                        if let (Some(started), Some(item)) =
-                            (start_poll.get(), current_item_poll.borrow().as_ref())
-                        {
-                            let elapsed = offset_poll.get() + started.elapsed().as_secs_f64();
-                            controls_poll.set_playback_progress(elapsed, item.duration_secs);
+                        stopped_ticks += 1;
+                        if stopped_ticks >= 3 {
+                            *current_id_poll.borrow_mut() = None;
+                            *current_item_poll.borrow_mut() = None;
+                            start_poll.set(None);
+                            offset_poll.set(0.0);
+                            grid_poll.set_active_sound(None);
+                            status_lbl_poll.set_label("Ready");
+                            controls_poll.reset_progress();
+                            stopped_ticks = 0;
+                        }
+                    } else {
+                        stopped_ticks = 0;
+                        if !seeking_poll.get() {
+                            if let (Some(started), Some(item)) =
+                                (start_poll.get(), current_item_poll.borrow().as_ref())
+                            {
+                                let elapsed = offset_poll.get() + started.elapsed().as_secs_f64();
+                                controls_poll.set_playback_progress(elapsed, item.duration_secs);
+                            }
                         }
                     }
+                } else {
+                    stopped_ticks = 0;
                 }
                 glib::ControlFlow::Continue
             });
