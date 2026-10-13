@@ -11,7 +11,27 @@ use libadwaita::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{channel, Sender};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+enum LibraryEvent {
+    ScanComplete {
+        generation: u64,
+        items: Vec<SoundItem>,
+        folder_display: String,
+    },
+    DurationProbed {
+        generation: u64,
+        id: String,
+        duration: f64,
+    },
+    ScanError {
+        generation: u64,
+        error: String,
+    },
+}
 
 pub struct MainWindow {
     window: adw::ApplicationWindow,
@@ -27,6 +47,8 @@ pub struct MainWindow {
     playback_start: Rc<Cell<Option<Instant>>>,
     playback_offset: Rc<Cell<f64>>,
     is_user_seeking: Rc<Cell<bool>>,
+    load_generation: Arc<AtomicU64>,
+    scan_sender: Sender<LibraryEvent>,
 }
 
 impl MainWindow {
@@ -109,6 +131,10 @@ impl MainWindow {
 
         window.set_content(Some(&main_box));
 
+        let load_generation = Arc::new(AtomicU64::new(0));
+        let (scan_sender, scan_receiver) = channel::<LibraryEvent>();
+        let scan_receiver = Rc::new(RefCell::new(scan_receiver));
+
         let main_window = Rc::new(Self {
             window,
             config,
@@ -123,7 +149,29 @@ impl MainWindow {
             playback_start,
             playback_offset,
             is_user_seeking,
+            load_generation,
+            scan_sender,
         });
+
+        {
+            let weak_window = Rc::downgrade(&main_window);
+            let rx = scan_receiver.clone();
+            glib::timeout_add_local(Duration::from_millis(25), move || {
+                if let Some(this) = weak_window.upgrade() {
+                    let mut processed = 0;
+                    while let Ok(event) = rx.borrow().try_recv() {
+                        this.handle_library_event(event);
+                        processed += 1;
+                        if processed >= 64 {
+                            break;
+                        }
+                    }
+                    glib::ControlFlow::Continue
+                } else {
+                    glib::ControlFlow::Break
+                }
+            });
+        }
 
         {
             let engine_poll = main_window.audio_engine.clone();
@@ -346,14 +394,7 @@ impl MainWindow {
     }
 
     pub fn load_directory(self: &Rc<Self>, path: &Path) {
-        let count = match self.library.borrow_mut().scan_directory(path) {
-            Ok(c) => c,
-            Err(e) => {
-                self.status_label
-                    .set_label(&format!("Error scanning folder: {}", e));
-                return;
-            }
-        };
+        let generation = self.load_generation.fetch_add(1, Ordering::SeqCst) + 1;
 
         {
             let mut cfg = self.config.borrow_mut();
@@ -367,13 +408,147 @@ impl MainWindow {
             .unwrap_or("Sounds");
         self.controls.set_folder_label(dir_name);
 
-        self.count_label
-            .set_label(&format!("{} sounds loaded", count));
+        self.count_label.set_label("Scanning...");
         self.status_label
-            .set_label(&format!("Loaded folder: {}", path.display()));
+            .set_label(&format!("Scanning folder: {}...", path.display()));
 
-        let items = self.library.borrow().items().to_vec();
-        self.render_sound_cards(&items);
+        let path_buf = path.to_path_buf();
+        let sender = self.scan_sender.clone();
+        let active_gen = self.load_generation.clone();
+
+        std::thread::spawn(move || {
+            if generation != active_gen.load(Ordering::SeqCst) {
+                return;
+            }
+
+            let items = match SoundLibrary::scan_path(&path_buf) {
+                Ok(items) => items,
+                Err(e) => {
+                    let _ = sender.send(LibraryEvent::ScanError {
+                        generation,
+                        error: e.to_string(),
+                    });
+                    return;
+                }
+            };
+
+            let folder_display = path_buf.display().to_string();
+            let _ = sender.send(LibraryEvent::ScanComplete {
+                generation,
+                items: items.clone(),
+                folder_display,
+            });
+
+            if items.is_empty() || generation != active_gen.load(Ordering::SeqCst) {
+                return;
+            }
+
+            let work_items: Vec<(String, std::path::PathBuf)> = items
+                .into_iter()
+                .map(|item| (item.id, item.path))
+                .collect();
+            let queue = std::sync::Arc::new(std::sync::Mutex::new(work_items));
+
+            let num_workers = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4)
+                .clamp(2, 8);
+
+            let mut handles = Vec::with_capacity(num_workers);
+            for _ in 0..num_workers {
+                let queue = queue.clone();
+                let sender = sender.clone();
+                let active_gen = active_gen.clone();
+
+                handles.push(std::thread::spawn(move || {
+                    loop {
+                        if generation != active_gen.load(Ordering::SeqCst) {
+                            break;
+                        }
+
+                        let next = {
+                            let mut q = queue.lock().unwrap();
+                            q.pop()
+                        };
+
+                        let Some((id, path)) = next else {
+                            break;
+                        };
+
+                        let duration = SoundItem::probe_duration(&path);
+
+                        if generation != active_gen.load(Ordering::SeqCst) {
+                            break;
+                        }
+
+                        if duration > 0.0 {
+                            let _ = sender.send(LibraryEvent::DurationProbed {
+                                generation,
+                                id,
+                                duration,
+                            });
+                        }
+                    }
+                }));
+            }
+
+            for handle in handles {
+                let _ = handle.join();
+            }
+        });
+    }
+
+    fn handle_library_event(self: &Rc<Self>, event: LibraryEvent) {
+        match event {
+            LibraryEvent::ScanComplete {
+                generation,
+                items,
+                folder_display,
+            } => {
+                if generation != self.load_generation.load(Ordering::SeqCst) {
+                    return;
+                }
+                let count = items.len();
+                self.library.borrow_mut().set_items(items.clone());
+                self.count_label
+                    .set_label(&format!("{} sounds loaded", count));
+                self.status_label
+                    .set_label(&format!("Loaded folder: {}", folder_display));
+
+                let search_text = self.controls.search_entry().text().to_string();
+                if search_text.trim().is_empty() {
+                    self.render_sound_cards(&items);
+                } else {
+                    self.filter_sounds(&search_text);
+                }
+            }
+            LibraryEvent::DurationProbed {
+                generation,
+                id,
+                duration,
+            } => {
+                if generation != self.load_generation.load(Ordering::SeqCst) {
+                    return;
+                }
+                self.library.borrow_mut().update_item_duration(&id, duration);
+                self.sound_grid.update_sound_duration(&id, duration);
+
+                if self.current_playing_id.borrow().as_deref() == Some(&id) {
+                    if let Some(item) = self.current_playing_item.borrow_mut().as_mut() {
+                        item.update_duration(duration);
+                    }
+                }
+            }
+            LibraryEvent::ScanError { generation, error } => {
+                if generation != self.load_generation.load(Ordering::SeqCst) {
+                    return;
+                }
+                self.status_label
+                    .set_label(&format!("Error scanning folder: {}", error));
+                self.count_label.set_label("0 sounds loaded");
+                self.render_sound_cards(&[]);
+            }
+        }
     }
 
     fn filter_sounds(self: &Rc<Self>, query: &str) {
@@ -395,6 +570,16 @@ impl MainWindow {
         if self.current_playing_id.borrow().as_deref() == Some(&item.id) {
             self.stop_all();
             return;
+        }
+
+        let mut item = item.clone();
+        if item.duration_secs <= 0.0 {
+            let probed = SoundItem::probe_duration(&item.path);
+            if probed > 0.0 {
+                item.update_duration(probed);
+                self.library.borrow_mut().update_item_duration(&item.id, probed);
+                self.sound_grid.update_sound_duration(&item.id, probed);
+            }
         }
 
         let master = self.controls.master_volume();
@@ -435,12 +620,27 @@ impl MainWindow {
 
     fn seek_playback(self: &Rc<Self>, target_secs: f64) {
         let current_item = self.current_playing_item.borrow().clone();
-        if let Some(item) = current_item {
+        if let Some(mut item) = current_item {
+            if item.duration_secs <= 0.0 {
+                let probed = SoundItem::probe_duration(&item.path);
+                if probed > 0.0 {
+                    item.update_duration(probed);
+                    *self.current_playing_item.borrow_mut() = Some(item.clone());
+                    self.library.borrow_mut().update_item_duration(&item.id, probed);
+                    self.sound_grid.update_sound_duration(&item.id, probed);
+                }
+            }
+
             self.is_user_seeking.set(true);
             let master = self.controls.master_volume();
             let vol_local = self.controls.local_volume() * master;
             let vol_mic = self.controls.mic_volume() * master;
-            let clamped = target_secs.clamp(0.0, item.duration_secs);
+            let max_dur = if item.duration_secs > 0.0 {
+                item.duration_secs
+            } else {
+                target_secs
+            };
+            let clamped = target_secs.clamp(0.0, max_dur);
 
             match self
                 .audio_engine

@@ -7,6 +7,7 @@ pub struct SoundCardWidget {
     pub button: gtk::Button,
     pub icon: gtk::Image,
     pub badge: gtk::Label,
+    pub size_label: gtk::Label,
     pub item: SoundItem,
 }
 
@@ -98,8 +99,19 @@ impl SoundCardWidget {
             button,
             icon,
             badge,
+            size_label,
             item: item.clone(),
         }
+    }
+
+    pub fn update_duration(&mut self, secs: f64) {
+        self.item.update_duration(secs);
+        let subtitle = if self.item.duration_secs > 0.0 {
+            format!("{} • {}", self.item.formatted_duration, self.item.formatted_size)
+        } else {
+            self.item.formatted_size.clone()
+        };
+        self.size_label.set_label(&subtitle);
     }
 
     pub fn set_playing(&self, playing: bool) {

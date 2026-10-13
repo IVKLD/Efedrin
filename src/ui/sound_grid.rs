@@ -105,4 +105,13 @@ impl SoundGrid {
             card.set_playing(active_id == Some(&card.item.id));
         }
     }
+
+    pub fn update_sound_duration(&self, sound_id: &str, secs: f64) {
+        for card in self.cards.borrow_mut().iter_mut() {
+            if card.item.id == sound_id {
+                card.update_duration(secs);
+                break;
+            }
+        }
+    }
 }

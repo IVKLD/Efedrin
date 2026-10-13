@@ -60,9 +60,6 @@ impl SoundItem {
             format!("{:.1} MB", size_bytes as f64 / (1024.0 * 1024.0))
         };
 
-        let duration_secs = Self::probe_duration(path);
-        let formatted_duration = Self::format_duration(duration_secs);
-
         let id = path.to_string_lossy().into_owned();
 
         Some(Self {
@@ -71,9 +68,14 @@ impl SoundItem {
             path: path.to_path_buf(),
             extension: ext.to_uppercase(),
             formatted_size,
-            duration_secs,
-            formatted_duration,
+            duration_secs: 0.0,
+            formatted_duration: String::new(),
         })
+    }
+
+    pub fn update_duration(&mut self, secs: f64) {
+        self.duration_secs = secs;
+        self.formatted_duration = Self::format_duration(secs);
     }
 }
 
@@ -87,7 +89,7 @@ impl SoundLibrary {
         Self { items: Vec::new() }
     }
 
-    pub fn scan_directory(&mut self, directory: &Path) -> Result<usize> {
+    pub fn scan_path(directory: &Path) -> Result<Vec<SoundItem>> {
         if !directory.is_dir() {
             return Err(AppError::NotFound(format!(
                 "Directory does not exist: {}",
@@ -104,14 +106,30 @@ impl SoundLibrary {
             .collect();
 
         discovered.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
-        let count = discovered.len();
-        self.items = discovered;
+        Ok(discovered)
+    }
 
+    #[allow(dead_code)]
+    pub fn scan_directory(&mut self, directory: &Path) -> Result<usize> {
+        let items = Self::scan_path(directory)?;
+        let count = items.len();
+        self.items = items;
         Ok(count)
     }
 
+    pub fn set_items(&mut self, items: Vec<SoundItem>) {
+        self.items = items;
+    }
+
+    #[allow(dead_code)]
     pub fn items(&self) -> &[SoundItem] {
         &self.items
+    }
+
+    pub fn update_item_duration(&mut self, id: &str, duration_secs: f64) {
+        if let Some(item) = self.items.iter_mut().find(|i| i.id == id) {
+            item.update_duration(duration_secs);
+        }
     }
 
     pub fn filter(&self, query: &str) -> Vec<SoundItem> {
@@ -126,5 +144,37 @@ impl SoundLibrary {
             .filter(|item| item.title.to_lowercase().contains(&query_lower))
             .cloned()
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sound_item_creation_and_duration_update() {
+        let sample_path = Path::new("sample_sounds/coin.wav");
+        if sample_path.exists() {
+            let item = SoundItem::from_path(sample_path).expect("should parse sound item");
+            assert_eq!(item.duration_secs, 0.0);
+            assert_eq!(item.formatted_duration, "");
+            assert_eq!(item.extension, "WAV");
+
+            let mut library = SoundLibrary::new();
+            library.set_items(vec![item.clone()]);
+            library.update_item_duration(&item.id, 125.4);
+
+            let updated = &library.items()[0];
+            assert_eq!(updated.duration_secs, 125.4);
+            assert_eq!(updated.formatted_duration, "02:05");
+        }
+    }
+
+    #[test]
+    fn test_format_duration() {
+        assert_eq!(SoundItem::format_duration(0.0), "00:00");
+        assert_eq!(SoundItem::format_duration(59.4), "00:59");
+        assert_eq!(SoundItem::format_duration(60.0), "01:00");
+        assert_eq!(SoundItem::format_duration(3665.0), "61:05");
     }
 }

@@ -294,7 +294,11 @@ impl ControlsBar {
         self.progress_scale.set_range(0.0, total);
         self.progress_scale.set_value(current);
         self.time_current_label.set_label(&Self::format_timestamp(current));
-        self.time_total_label.set_label(&Self::format_timestamp(total));
+        if total_secs > 0.1 {
+            self.time_total_label.set_label(&Self::format_timestamp(total));
+        } else {
+            self.time_total_label.set_label("--:--");
+        }
     }
 
     pub fn reset_progress(&self) {
