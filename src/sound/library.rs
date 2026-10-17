@@ -39,11 +39,17 @@ impl SoundItem {
         format!("{:02}:{:02}", m, s)
     }
 
+    pub const SUPPORTED_EXTENSIONS: &[&str] = &["mp3", "wav", "ogg", "flac", "opus", "m4a", "aac", "webm"];
+
+    pub fn is_supported_extension(ext: &str) -> bool {
+        let ext = ext.to_lowercase();
+        Self::SUPPORTED_EXTENSIONS.contains(&ext.as_str())
+    }
+
     pub fn from_path(path: &Path) -> Option<Self> {
         let ext = path.extension()?.to_str()?.to_lowercase();
-        let valid_extensions = ["mp3", "wav", "ogg", "flac", "opus", "m4a", "aac", "webm"];
 
-        if !valid_extensions.contains(&ext.as_str()) {
+        if !Self::is_supported_extension(&ext) {
             return None;
         }
 
@@ -90,6 +96,13 @@ impl SoundLibrary {
     }
 
     pub fn scan_path(directory: &Path) -> Result<Vec<SoundItem>> {
+        Self::scan_path_with_cache(directory, None)
+    }
+
+    pub fn scan_path_with_cache(
+        directory: &Path,
+        existing_items: Option<&[SoundItem]>,
+    ) -> Result<Vec<SoundItem>> {
         if !directory.is_dir() {
             return Err(AppError::NotFound(format!(
                 "Directory does not exist: {}",
@@ -104,6 +117,31 @@ impl SoundLibrary {
             .filter(|e| e.file_type().is_file())
             .filter_map(|e| SoundItem::from_path(e.path()))
             .collect();
+
+        if let Some(existing) = existing_items {
+            let mut cache = std::collections::HashMap::new();
+            for item in existing {
+                if item.duration_secs > 0.0 {
+                    cache.insert(
+                        item.id.as_str(),
+                        (
+                            item.duration_secs,
+                            item.formatted_duration.as_str(),
+                            item.formatted_size.as_str(),
+                        ),
+                    );
+                }
+            }
+
+            for item in &mut discovered {
+                if let Some(&(dur, fmt, size)) = cache.get(item.id.as_str()) {
+                    if item.formatted_size == size {
+                        item.duration_secs = dur;
+                        item.formatted_duration = fmt.to_string();
+                    }
+                }
+            }
+        }
 
         discovered.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
         Ok(discovered)
@@ -176,5 +214,26 @@ mod tests {
         assert_eq!(SoundItem::format_duration(59.4), "00:59");
         assert_eq!(SoundItem::format_duration(60.0), "01:00");
         assert_eq!(SoundItem::format_duration(3665.0), "61:05");
+    }
+
+    #[test]
+    fn test_scan_path_with_cache() {
+        let sample_dir = Path::new("sample_sounds");
+        if sample_dir.is_dir() {
+            let mut items = SoundLibrary::scan_path(sample_dir).expect("scan sample sounds");
+            assert!(!items.is_empty());
+
+            // Set duration on first item
+            items[0].update_duration(42.0);
+            assert_eq!(items[0].formatted_duration, "00:42");
+
+            // Re-scan with cache
+            let rescanned = SoundLibrary::scan_path_with_cache(sample_dir, Some(&items))
+                .expect("rescan with cache");
+
+            assert_eq!(rescanned[0].id, items[0].id);
+            assert_eq!(rescanned[0].duration_secs, 42.0);
+            assert_eq!(rescanned[0].formatted_duration, "00:42");
+        }
     }
 }

@@ -1,6 +1,6 @@
 use crate::audio::AudioEngine;
 use crate::config::AppConfig;
-use crate::sound::{SoundItem, SoundLibrary};
+use crate::sound::{LibraryWatcher, SoundItem, SoundLibrary};
 use crate::ui::controls::ControlsBar;
 use crate::ui::header::Header;
 use crate::ui::sound_grid::SoundGrid;
@@ -17,10 +17,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 enum LibraryEvent {
+    DirectoryChanged,
     ScanComplete {
         generation: u64,
         items: Vec<SoundItem>,
         folder_display: String,
+        is_initial: bool,
     },
     DurationProbed {
         generation: u64,
@@ -49,6 +51,8 @@ pub struct MainWindow {
     is_user_seeking: Rc<Cell<bool>>,
     load_generation: Arc<AtomicU64>,
     scan_sender: Sender<LibraryEvent>,
+    watcher: Rc<RefCell<Option<LibraryWatcher>>>,
+    pending_reload_at: Rc<Cell<Option<Instant>>>,
 }
 
 impl MainWindow {
@@ -151,6 +155,8 @@ impl MainWindow {
             is_user_seeking,
             load_generation,
             scan_sender,
+            watcher: Rc::new(RefCell::new(None)),
+            pending_reload_at: Rc::new(Cell::new(None)),
         });
 
         {
@@ -166,6 +172,14 @@ impl MainWindow {
                             break;
                         }
                     }
+
+                    if let Some(deadline) = this.pending_reload_at.get() {
+                        if Instant::now() >= deadline {
+                            this.pending_reload_at.set(None);
+                            this.refresh_library(false);
+                        }
+                    }
+
                     glib::ControlFlow::Continue
                 } else {
                     glib::ControlFlow::Break
@@ -394,8 +408,6 @@ impl MainWindow {
     }
 
     pub fn load_directory(self: &Rc<Self>, path: &Path) {
-        let generation = self.load_generation.fetch_add(1, Ordering::SeqCst) + 1;
-
         {
             let mut cfg = self.config.borrow_mut();
             cfg.sound_directory = Some(path.to_path_buf());
@@ -408,10 +420,51 @@ impl MainWindow {
             .unwrap_or("Sounds");
         self.controls.set_folder_label(dir_name);
 
-        self.count_label.set_label("Scanning...");
-        self.status_label
-            .set_label(&format!("Scanning folder: {}...", path.display()));
+        self.setup_watcher(path);
+        self.start_scan(path, true);
+    }
 
+    pub fn refresh_library(self: &Rc<Self>, is_initial: bool) {
+        let dir = self.config.borrow().sound_directory.clone();
+        if let Some(path) = dir {
+            if path.exists() {
+                self.start_scan(&path, is_initial);
+            }
+        }
+    }
+
+    fn setup_watcher(self: &Rc<Self>, path: &Path) {
+        let need_new = match self.watcher.borrow().as_ref() {
+            Some(w) => w.watched_path() != path,
+            None => true,
+        };
+
+        if need_new {
+            *self.watcher.borrow_mut() = None;
+            let sender = self.scan_sender.clone();
+            match LibraryWatcher::watch(path, move || {
+                let _ = sender.send(LibraryEvent::DirectoryChanged);
+            }) {
+                Ok(w) => {
+                    *self.watcher.borrow_mut() = Some(w);
+                }
+                Err(e) => {
+                    eprintln!("Failed to setup directory watcher on {}: {}", path.display(), e);
+                }
+            }
+        }
+    }
+
+    fn start_scan(self: &Rc<Self>, path: &Path, is_initial: bool) {
+        let generation = self.load_generation.fetch_add(1, Ordering::SeqCst) + 1;
+
+        if is_initial {
+            self.count_label.set_label("Scanning...");
+            self.status_label
+                .set_label(&format!("Scanning folder: {}...", path.display()));
+        }
+
+        let existing_items = self.library.borrow().items().to_vec();
         let path_buf = path.to_path_buf();
         let sender = self.scan_sender.clone();
         let active_gen = self.load_generation.clone();
@@ -421,7 +474,7 @@ impl MainWindow {
                 return;
             }
 
-            let items = match SoundLibrary::scan_path(&path_buf) {
+            let items = match SoundLibrary::scan_path_with_cache(&path_buf, Some(&existing_items)) {
                 Ok(items) => items,
                 Err(e) => {
                     let _ = sender.send(LibraryEvent::ScanError {
@@ -437,16 +490,23 @@ impl MainWindow {
                 generation,
                 items: items.clone(),
                 folder_display,
+                is_initial,
             });
 
-            if items.is_empty() || generation != active_gen.load(Ordering::SeqCst) {
+            if generation != active_gen.load(Ordering::SeqCst) {
                 return;
             }
 
             let work_items: Vec<(String, std::path::PathBuf)> = items
                 .into_iter()
+                .filter(|item| item.duration_secs <= 0.0)
                 .map(|item| (item.id, item.path))
                 .collect();
+
+            if work_items.is_empty() {
+                return;
+            }
+
             let queue = std::sync::Arc::new(std::sync::Mutex::new(work_items));
 
             let num_workers = std::thread::available_parallelism()
@@ -500,26 +560,50 @@ impl MainWindow {
 
     fn handle_library_event(self: &Rc<Self>, event: LibraryEvent) {
         match event {
+            LibraryEvent::DirectoryChanged => {
+                self.pending_reload_at
+                    .set(Some(Instant::now() + Duration::from_millis(300)));
+            }
             LibraryEvent::ScanComplete {
                 generation,
                 items,
                 folder_display,
+                is_initial,
             } => {
                 if generation != self.load_generation.load(Ordering::SeqCst) {
                     return;
                 }
+
+                let items_changed = *self.library.borrow().items() != items;
                 let count = items.len();
                 self.library.borrow_mut().set_items(items.clone());
-                self.count_label
-                    .set_label(&format!("{} sounds loaded", count));
-                self.status_label
-                    .set_label(&format!("Loaded folder: {}", folder_display));
 
-                let search_text = self.controls.search_entry().text().to_string();
-                if search_text.trim().is_empty() {
-                    self.render_sound_cards(&items);
-                } else {
-                    self.filter_sounds(&search_text);
+                if is_initial || items_changed {
+                    self.count_label
+                        .set_label(&format!("{} sounds loaded", count));
+                    if is_initial {
+                        self.status_label
+                            .set_label(&format!("Loaded folder: {}", folder_display));
+                    } else {
+                        self.status_label
+                            .set_label(&format!("Library updated: {} sounds", count));
+                    }
+
+                    if let Some(playing_id) = self.current_playing_id.borrow().as_ref() {
+                        if !items.iter().any(|i| &i.id == playing_id) {
+                            self.stop_all();
+                            self.status_label.set_label(
+                                "Currently playing sound was removed from library, playback stopped",
+                            );
+                        }
+                    }
+
+                    let search_text = self.controls.search_entry().text().to_string();
+                    if search_text.trim().is_empty() {
+                        self.render_sound_cards(&items);
+                    } else {
+                        self.filter_sounds(&search_text);
+                    }
                 }
             }
             LibraryEvent::DurationProbed {

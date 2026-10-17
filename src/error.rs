@@ -20,6 +20,9 @@ pub enum AppError {
     #[allow(dead_code)]
     #[error("Configuration error: {0}")]
     Config(String),
+
+    #[error("Watcher error: {0}")]
+    Watcher(String),
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;
