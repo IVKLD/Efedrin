@@ -17,10 +17,6 @@ pub enum AppError {
     #[error("Resource not found: {0}")]
     NotFound(String),
 
-    #[allow(dead_code)]
-    #[error("Configuration error: {0}")]
-    Config(String),
-
     #[error("Watcher error: {0}")]
     Watcher(String),
 }

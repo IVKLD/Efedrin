@@ -1,31 +1,8 @@
+use super::types::AppConfig;
 use crate::error::Result;
-use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter};
 use std::path::PathBuf;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AppConfig {
-    pub sound_directory: Option<PathBuf>,
-    pub volume_master: f64,
-    pub volume_local: f64,
-    pub volume_mic: f64,
-    pub mic_passthrough: bool,
-    pub selected_microphone: Option<String>,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            sound_directory: None,
-            volume_master: 1.0,
-            volume_local: 0.8,
-            volume_mic: 1.0,
-            mic_passthrough: false,
-            selected_microphone: None,
-        }
-    }
-}
 
 impl AppConfig {
     pub fn config_dir() -> PathBuf {
