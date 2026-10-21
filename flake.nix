@@ -13,7 +13,7 @@
 
         version = "0.1.0";
         # Binary release settings for x86_64-linux (prebuilt binary from GitHub Releases)
-        binVersion = "''0.1.0"; # BIN_VERSION
+        binVersion = "0.1.0"; # BIN_VERSION
         binHash = "sha256-p4RJVcJ2BEF2f7YWYPb3izfbjrheXtJAESudbSo686Y="; # BIN_HASH
 
         nativeBuildInputs = with pkgs; [

@@ -49,7 +49,7 @@ jobs:
           if [ -z "$RAW_TAG" ] || [ "$RAW_TAG" = "main" ]; then
             RAW_TAG="v0.1.0"
           fi
-          VERSION="''${RAW_TAG#v}"
+          VERSION="${RAW_TAG#v}"
           echo "TAG=$RAW_TAG" >> $GITHUB_ENV
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
