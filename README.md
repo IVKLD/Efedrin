@@ -11,9 +11,45 @@
 - Горячие клавиши: `Space` или `Esc` — мгновенно заглушить всё.
 - Поддерживает форматы mp3, wav, ogg, flac, opus, m4a.
 
-## Установка в NixOS
+## Установка в NixOS и Home Manager
 
-### Вариант 1: Через Flake Inputs (рекомендуется)
+> **Быстрая установка:** По умолчанию Flake использует готовый предсобранный бинарник (`efedrin-bin`) через `autoPatchelfHook` — сборка Rust на вашей машине **не требуется**, установка занимает пару секунд!
+
+### Вариант 1: Через Home Manager (Flakes)
+
+В `flake.nix` (конфигурации системы или dotfiles):
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    home-manager.url = "github:nix-community/home-manager";
+    efedrin.url = "github:IVKLD/Efedrin";
+  };
+
+  outputs = { nixpkgs, home-manager, efedrin, ... }: {
+    # В модулях home-manager:
+    homeConfigurations.youruser = home-manager.lib.homeManagerConfiguration {
+      modules = [
+        efedrin.homeManagerModules.default
+        {
+          programs.efedrin.enable = true;
+        }
+      ];
+    };
+  };
+}
+```
+
+Или в `home.nix` через `home.packages`:
+
+```nix
+home.packages = [
+  inputs.efedrin.packages.${pkgs.system}.default
+];
+```
+
+### Вариант 2: В конфигурацию NixOS
 
 В `flake.nix` твоей системы:
 
@@ -24,7 +60,7 @@
     efedrin.url = "github:IVKLD/Efedrin";
   };
 
-  outputs = { self, nixpkgs, efedrin, ... }: {
+  outputs = { nixpkgs, efedrin, ... }: {
     nixosConfigurations.yourhostname = nixpkgs.lib.nixosSystem {
       modules = [
         efedrin.nixosModules.default
@@ -37,31 +73,27 @@
 }
 ```
 
-Или просто добавить пакет в `environment.systemPackages`:
-
-```nix
-environment.systemPackages = [
-  inputs.efedrin.packages.${pkgs.system}.default
-];
-```
-
-### Вариант 2: Запуск без установки
-
-```bash
-nix run github:IVKLD/Efedrin
-```
-
-### Вариант 3: Установка через nix profile
+### Вариант 3: Установка в профиль пользователя (nix profile)
 
 ```bash
 nix profile install github:IVKLD/Efedrin
 ```
 
-## Сборка из исходников
-
-Нужны `rust`, `cargo`, `gtk4`, `libadwaita`, `pipewire`, `ffmpeg`.
+### Вариант 4: Запуск без установки
 
 ```bash
+nix run github:IVKLD/Efedrin
+```
+
+## Сборка из исходников
+
+Если вы хотите принудительно собрать проект из исходников на своей машине:
+
+```bash
+# Через Nix Flake:
+nix build .#efedrin-source
+
+# Или через Cargo:
 cargo build --release
 ./target/release/efedrin
 ```

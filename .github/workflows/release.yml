@@ -1,0 +1,97 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release Tag (e.g. v0.1.0)'
+        required: true
+        default: 'v0.1.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Release Binary
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libgtk-4-dev \
+            libadwaita-1-dev \
+            libpipewire-0.3-dev \
+            libasound2-dev
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Package tarball
+        run: |
+          RAW_TAG="${{ github.ref_name || github.event.inputs.tag }}"
+          if [ -z "$RAW_TAG" ] || [ "$RAW_TAG" = "main" ]; then
+            RAW_TAG="v0.1.0"
+          fi
+          VERSION="''${RAW_TAG#v}"
+          echo "TAG=$RAW_TAG" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+          mkdir -p dist
+          cp target/release/efedrin dist/
+          cp resources/efedrin.desktop dist/
+          cp resources/efedrin.svg dist/
+          if [ -f resources/tag-symbolic.svg ]; then
+            cp resources/tag-symbolic.svg dist/
+          fi
+
+          tar -czvf efedrin-x86_64-linux.tar.gz -C dist efedrin efedrin.desktop efedrin.svg $([ -f dist/tag-symbolic.svg ] && echo tag-symbolic.svg)
+          sha256sum efedrin-x86_64-linux.tar.gz > efedrin-x86_64-linux.tar.gz.sha256
+          RAW_HASH=$(sha256sum efedrin-x86_64-linux.tar.gz | awk '{print $1}')
+          SRI_HASH=$(npx ssri-cli --algo sha256 efedrin-x86_64-linux.tar.gz 2>/dev/null || openssl dgst -sha256 -binary efedrin-x86_64-linux.tar.gz | base64 | awk '{print "sha256-" $1}')
+          
+          echo "HEX_HASH=$RAW_HASH" >> $GITHUB_ENV
+          echo "SRI_HASH=$SRI_HASH" >> $GITHUB_ENV
+          echo "::notice ::Binary SRI Hash: $SRI_HASH"
+          echo "::notice ::Binary SHA256: $RAW_HASH"
+
+      - name: Upload Release to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            efedrin-x86_64-linux.tar.gz
+            efedrin-x86_64-linux.tar.gz.sha256
+          tag_name: ${{ env.TAG }}
+          name: Release ${{ env.TAG }}
+          generate_release_notes: true
+
+      - name: Update flake.nix on main
+        run: |
+          git checkout main || git checkout -b main origin/main
+          git pull origin main || true
+
+          sed -i "s/binVersion = \".*\"; # BIN_VERSION/binVersion = \"$VERSION\"; # BIN_VERSION/" flake.nix
+          sed -i "s|binHash = \".*\"; # BIN_HASH|binHash = \"$SRI_HASH\"; # BIN_HASH|" flake.nix
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet flake.nix; then
+            git commit -m "chore(release): update binary hash for $TAG [skip ci]" flake.nix
+            git push origin main || true
+          fi
